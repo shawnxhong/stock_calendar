@@ -28,6 +28,23 @@ def _run(script: str) -> int:
     return subprocess.call([sys.executable, str(HERE / script)])
 
 
+def update_delivery_state(state: dict, doc: dict, changes: list[dict],
+                          tier: str, pushed_at: str) -> int:
+    """Bookkeep newly deliverable events without coupling to any transport."""
+    pushed = state.setdefault("pushed", {})
+    changed = {c["id"] for c in changes
+               if c["type"] in ("MOVED", "CANCELLED", "CONFIRMED")}
+    tier_map = pushed.setdefault(tier, {})
+    fresh = 0
+    for ev in doc["events"]:
+        prev = tier_map.get(ev["id"])
+        if prev is None or ev["id"] in changed:
+            tier_map[ev["id"]] = pushed_at
+            fresh += 1
+    state["last_run"] = {"tier": tier, "at": pushed_at}
+    return fresh
+
+
 def doctor() -> int:
     """Check config and reachability. Run this first in a new environment."""
     import os
@@ -122,6 +139,13 @@ def doctor() -> int:
         ok &= good
     else:
         print("  ⏭ Finnhub：缺少 FINNHUB_API_KEY，未联网测试")
+
+    # Connectivity/schema probe only. AAPL is not added to the user's watchlist.
+    from fetch_earnings import yfinance_earnings
+    yf_rows = yfinance_earnings(["AAPL"])
+    yf_good = bool(yf_rows.get("AAPL"))
+    print(f"  {'✅' if yf_good else '❌'} yfinance schema（AAPL 诊断，不写入 watchlist）")
+    ok &= yf_good
     return 0 if ok else 1
 
 
@@ -161,17 +185,10 @@ def main() -> int:
 
     # Idempotency bookkeeping.
     state = read_json(DATA / "state.json", {}) or {}
-    pushed = state.setdefault("pushed", {})
-    changed = {c["id"] for c in (read_json(DATA / "changes.json") or {}).get("changes", [])
-               if c["type"] in ("MOVED", "CANCELLED", "CONFIRMED")}
-    tier_map = pushed.setdefault(args.tier, {})
-    fresh = 0
-    for ev in doc["events"]:
-        prev = tier_map.get(ev["id"])
-        if prev is None or ev["id"] in changed:
-            tier_map[ev["id"]] = now_utc_iso()
-            fresh += 1
-    state["last_run"] = {"tier": args.tier, "at": now_utc_iso()}
+    pushed_at = now_utc_iso()
+    fresh = update_delivery_state(
+        state, doc, (read_json(DATA / "changes.json") or {}).get("changes", []),
+        args.tier, pushed_at)
     write_json(DATA / "state.json", state)
 
     print(f"[ok] {out}")

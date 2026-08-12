@@ -340,16 +340,11 @@ def adp_schedule(start: dt.date, end: dt.date) -> list[dict] | None:
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    api_key = env_key("FRED_API_KEY")
+    api_key = env_key("FRED_API_KEY", required=False)
     cfg = settings()
     wl = load_yaml("events.yaml").get("macro") or []
     ids = load_yaml("release_ids.yaml") or {}
     cal = load_yaml("calendar.yaml")
-
-    if not ids:
-        sys.stderr.write(
-            "[fatal] config/release_ids.yaml is empty — run bootstrap_releases.py first.\n")
-        return 3
 
     start = today_et()
     end = start + dt.timedelta(days=int(cfg["fred"]["lookahead_days"]))
@@ -364,10 +359,23 @@ def main() -> int:
         "failures": [],
     }
 
+    if not api_key:
+        result["failures"].append({
+            "source": "fred", "severity": "critical",
+            "reason": "FRED_API_KEY 未配置；FRED 事件与前值缺失",
+        })
+    if not ids:
+        result["failures"].append({
+            "source": "fred", "severity": "critical",
+            "reason": "release_ids.yaml 为空；先运行 bootstrap_releases.py",
+        })
+
     for e in wl:
         if e.get("source") != "fred":
             continue
         key = e["key"]
+        if not api_key:
+            continue
         meta = ids.get(key)
         if not meta:
             result["failures"].append(

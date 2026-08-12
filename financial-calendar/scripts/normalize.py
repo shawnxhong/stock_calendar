@@ -50,6 +50,15 @@ def normalize_macro(raw, whitelist, conflicts):
     if not raw:
         return []
     fetched = raw.get("fetched_at")
+    window = raw.get("window") or {}
+    window_start = (dt.date.fromisoformat(window["start"])
+                    if window.get("start") else None)
+    window_end = (dt.date.fromisoformat(window["end"])
+                  if window.get("end") else None)
+
+    def in_window(day):
+        return ((window_start is None or day >= window_start)
+                and (window_end is None or day <= window_end))
     by_key = {e["key"]: e for e in whitelist}
     bls_idx = _bls_index(raw.get("bls"))
     out = []
@@ -140,6 +149,8 @@ def normalize_macro(raw, whitelist, conflicts):
             if not m.get(field):
                 continue
             d = dt.date.fromisoformat(str(m[field]))
+            if not in_window(d):
+                continue
             e = by_key.get(key, {})
             ev = _base(f"manual:{key}:{d.isoformat()}", "macro", label, d,
                        e.get("tier", "A"), e.get("time_et"),
@@ -167,6 +178,8 @@ def normalize_macro(raw, whitelist, conflicts):
         if not e:
             continue
         d = dt.date.fromisoformat(str(p["date"]))
+        if not in_window(d):
+            continue
         ev = _base(f"manual:{e['key']}:{d.isoformat()}", "macro", e["label"], d,
                    e.get("tier", "B"), e.get("time_et"),
                    p.get("source", "calendar.yaml (人工录入)"), fetched)

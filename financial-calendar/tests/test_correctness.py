@@ -243,6 +243,17 @@ class DoctorSourceContractTests(unittest.TestCase):
             fetch_macro.http_get = original
         self.assertIsNone(rows)
 
+    def test_finnhub_valid_empty_calendar_is_not_transport_failure(self) -> None:
+        import fetch_earnings
+        original = fetch_earnings.http_get
+        fetch_earnings.http_get = lambda *_args, **_kwargs: {"earningsCalendar": []}
+        try:
+            rows = fetch_earnings.finnhub_earnings(
+                "test", dt.date(2026, 1, 1), dt.date(2026, 1, 31), {"TEST"})
+        finally:
+            fetch_earnings.http_get = original
+        self.assertEqual(rows, {})
+
     def test_ism_retries_with_same_session_after_sso_cookie_page(self) -> None:
         html = b"""
         <table><tr><th>Month</th><th>Manufacturing PMI</th><th>Services PMI</th></tr>

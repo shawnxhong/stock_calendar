@@ -304,7 +304,9 @@ def _finish(lines: list[str], cfg: dict, short: bool) -> str:
     if len(flat) <= cap:
         return "\n".join(flat).rstrip() + "\n"
     kept = flat[:cap - 1]
-    kept.append(f"…（另有 {len(flat) - cap + 1} 行，见长版）")
+    while kept and kept[-1].startswith("### "):
+        kept.pop()
+    kept.append(f"…（另有 {len(flat) - len(kept)} 行，见长版）")
     return "\n".join(kept).rstrip() + "\n"
 
 

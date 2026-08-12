@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from common import (DATA, SNAPSHOTS, fmt_dual, now_utc_iso, read_json,  # noqa: E402
+from common import (DATA, SNAPSHOTS, et_date, fmt_dual, now_utc_iso, read_json,  # noqa: E402
                     settings, today_et, write_json)
 
 
@@ -58,13 +58,15 @@ def diff(prev: dict | None, cur: dict, miss_before_cancel: int,
     for eid, ev in cur_map.items():
         old = prev_map.get(eid)
         if old is None:
+            if et_date(ev["date_utc"]) < today_et():
+                continue
             # A pure date move shows up as an id change (dates are in the id).
             # Pair it with a same-key predecessor before calling it NEW.
             key = eid.rsplit(":", 1)[0]
             moved_from = [o for oid, o in prev_map.items()
                           if oid.rsplit(":", 1)[0] == key
                           and oid not in cur_map
-                          and dt.date.fromisoformat(o["date_utc"][:10]) >= today_et()]
+                          and et_date(o["date_utc"]) >= today_et()]
             if moved_from:
                 src = moved_from[0]
                 changes.append({
@@ -106,7 +108,7 @@ def diff(prev: dict | None, cur: dict, miss_before_cancel: int,
         if eid in cur_map:
             continue        # reappeared → drop from pending, no change reported
         # Past events legitimately fall out of the forward window.
-        if dt.date.fromisoformat(old["date_utc"][:10]) < today:
+        if et_date(old["date_utc"]) < today:
             continue
         # Already accounted for as a MOVED predecessor.
         if eid.rsplit(":", 1)[0] in moved_ids:
