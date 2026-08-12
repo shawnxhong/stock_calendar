@@ -20,9 +20,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "config"
-DATA = ROOT / "data"
+DATA = Path(os.environ.get("FINCAL_DATA_DIR", ROOT / "data")).expanduser().resolve()
 SNAPSHOTS = DATA / "snapshots"
-LOGS = ROOT / "logs"
+LOGS = Path(os.environ.get("FINCAL_LOG_DIR", ROOT / "logs")).expanduser().resolve()
 
 UTC = dt.timezone.utc
 ET = ZoneInfo("America/New_York")

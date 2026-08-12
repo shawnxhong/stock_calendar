@@ -17,6 +17,7 @@ import fetch_macro  # noqa: E402
 import normalize  # noqa: E402
 import render  # noqa: E402
 import run  # noqa: E402
+import adapters  # noqa: E402
 
 
 def macro(event_id: str, day: dt.date, time_et: str = "08:30",
@@ -202,6 +203,26 @@ class ManualWindowTests(unittest.TestCase):
         self.assertEqual({common.et_date(e["date_utc"]) for e in events},
                          {dt.date(2026, 9, 16)})
         self.assertEqual(len(events), 2)  # decision + independent presser
+
+
+class PortabilityTests(unittest.TestCase):
+    def test_directory_delivery_writes_both_versions(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            adapter = adapters.DirectoryDelivery(Path(td))
+            adapter.deliver(tier="week", short="short\n", long="long\n",
+                            idempotency_key="2026-08-12")
+            self.assertEqual(
+                (Path(td) / "2026-08-12-week.md").read_text(), "long\n")
+            self.assertEqual(
+                (Path(td) / "2026-08-12-week-short.md").read_text(), "short\n")
+
+    def test_json_state_store_round_trip(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            store = adapters.JsonFileStateStore(Path(td) / "state.json")
+            store.save({"pending_missing": {"x": {"misses": 1}}})
+            self.assertEqual(store.load()["pending_missing"]["x"]["misses"], 1)
 
 
 if __name__ == "__main__":

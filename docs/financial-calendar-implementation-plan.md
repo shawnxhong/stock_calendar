@@ -100,7 +100,7 @@
 
 ### P6 — 生产移植
 
-- [ ] 抽象 `Scheduler`、`SecretProvider`、`StateStore`、`DeliveryAdapter`、`HealthReporter`。
+- [x] 抽象 `Scheduler`、`SecretProvider`、`StateStore`、`DeliveryAdapter`、`HealthReporter`。
 - [ ] 生产环境重新执行 doctor、dry-run 和影子运行。
 - [ ] 配置真实投递和回退方案。
 
@@ -145,3 +145,6 @@
   Census 65、ISM 8、ADP 4 条，并保留人工 FOMC/密歇根事件。
 - 修正实跑发现的两个边界：人工历史事件按 fetch window 过滤；短版截断不再留下孤立日期标题。
 - 同一周度缓存任务连续运行，第二次报告 `本次新增/更新事件 0 条`；幂等实证通过。
+- 新增生产端口协议与本地参考适配器；`FINCAL_DATA_DIR` / `FINCAL_LOG_DIR` 可指向生产持久卷。
+- 新增 [production-migration.md](production-migration.md)，明确 secret、状态、调度、投递、健康告警与回退边界。
+- P6 抽象层回归后总测试数 46/46；未在 Hermes 上启用任何生产调度或外部投递。
