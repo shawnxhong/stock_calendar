@@ -62,7 +62,9 @@ def diff(prev: dict | None, cur: dict, miss_before_cancel: int,
             # Pair it with a same-key predecessor before calling it NEW.
             key = eid.rsplit(":", 1)[0]
             moved_from = [o for oid, o in prev_map.items()
-                          if oid.rsplit(":", 1)[0] == key and oid not in cur_map]
+                          if oid.rsplit(":", 1)[0] == key
+                          and oid not in cur_map
+                          and dt.date.fromisoformat(o["date_utc"][:10]) >= today_et()]
             if moved_from:
                 src = moved_from[0]
                 changes.append({

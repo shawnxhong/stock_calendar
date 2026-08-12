@@ -39,6 +39,7 @@ macro:
     tier: A
     source: fred
     match: ["Personal Income and Outlays"]
+    official_match: ["Personal Income and Outlays"]
     time_et: "08:30"
     fred_series: PCEPILFE
 
@@ -81,6 +82,7 @@ macro:
     source: fred
     match: ["Advance Monthly Sales for Retail and Food Services",
             "Advance Monthly Retail Trade"]
+    official_match: ["Advance Monthly Sales for Retail and Food Services"]
     time_et: "08:30"
     fred_series: RSAFS
 
@@ -105,6 +107,7 @@ macro:
     tier: B
     source: fred
     match: ["Gross Domestic Product"]
+    official_match: ["Gross Domestic Product"]
     time_et: "08:30"
     fred_series: GDPC1
 
@@ -113,6 +116,7 @@ macro:
     tier: B
     source: fred
     match: ["Advance Report on Durable Goods"]
+    official_match: ["Advance Monthly Manufacturers' Shipments, Inventories, and Orders"]
     time_et: "08:30"
     fred_series: DGORDER
 
@@ -163,6 +167,7 @@ macro:
     tier: C
     source: fred
     match: ["U.S. International Trade in Goods and Services"]
+    official_match: ["U.S. International Trade in Goods and Services"]
     time_et: "08:30"
 
   - key: consumer_credit
@@ -177,6 +182,7 @@ macro:
     tier: C
     source: fred
     match: ["New Residential Construction"]
+    official_match: ["New Residential Construction (Building Permits, Housing Starts, and Housing Completions)"]
     time_et: "08:30"
 
   - key: existing_home_sales

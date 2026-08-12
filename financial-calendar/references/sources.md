@@ -73,8 +73,9 @@ BLS 的 ICS 带**精确发布时点**，是静态时点表的交叉校验源。
 ### 坑（最重要的一条）
 
 **返回的日期可能是模型预估，也可能是公司公告，接口不明确区分。**
-因此本系统用"两源一致"作为 `confirmed` 的代理判据。这只是代理——
-真正意义上的 confirmed 需要 agent 找到公司 IR 公告后手动升级。
+因此本系统只把两源一致记为 `vendor_corroboration: agreed`，日期仍为
+`estimated`。只有 agent 找到公司 IR 公告，并在 `event_overrides.yaml` 保存
+来源和抓取时间后，才能升级为 `confirmed`。
 
 `hour` 字段：`bmo` 盘前 / `amc` 盘后 / `dmh` 盘中。缺失时不渲染时点。
 
@@ -88,6 +89,20 @@ BLS 的 ICS 带**精确发布时点**，是静态时点表的交叉校验源。
   提前准备的代价远小于错过
 
 ---
+
+## BEA — 官方机器可读发布日程
+
+- `https://apps.bea.gov/API/signup/release_dates.json`
+- JSON 直接提供发布名称与带时区的 UTC 时点，无需 API key。
+- 用于 GDP、Personal Income and Outlays（PCE）和贸易数据的交叉验证与补缺。
+- 非 dict、目标系列为空或日期解析失败时记入 `failures`，不得视为无事件。
+
+## Census — 官方 Economic Indicator Calendar
+
+- `https://www.census.gov/economic-indicators/calendar-listview.html`
+- 官方年历表提供 Indicator、Release Date、Time 和 Period Covered。
+- `indicator.xml` 是已发布数据的 RSS，不是未来日程，不能代替 calendar list view。
+- HTML 解析只依赖 `table#calendar` 的语义字段；解析出零行即源失败并告警。
 
 ## 无 API 的部分（人工 YAML）
 

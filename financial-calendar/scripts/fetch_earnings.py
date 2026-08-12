@@ -77,14 +77,9 @@ def reconcile(sym: str, fh: list[dict], yf_dates: list[str],
               policy: str) -> list[dict]:
     """Merge the two sources into records carrying explicit confidence.
 
-    Confidence rules:
-      confirmed  — both sources agree on the date (independent corroboration)
-      estimated  — only one source has it, or they disagree
-
-    Note: neither vendor reliably exposes an "IR-announced" flag, so agreement
-    is the strongest signal available at fetch time. The agent can later upgrade
-    a record to confirmed by finding the company's own announcement — that is
-    the only path that means "the company said so".
+    Vendor agreement is corroboration, not company confirmation. Every fetched
+    record remains estimated until an audited company IR source upgrades it via
+    config/event_overrides.yaml.
     """
     recs = []
     yset = set(yf_dates or [])
@@ -96,7 +91,8 @@ def reconcile(sym: str, fh: list[dict], yf_dates: list[str],
         rec = {
             "ticker": sym, "date": d, "hour": row.get("hour"),
             "quarter": row.get("quarter"), "year": row.get("year"),
-            "date_confidence": "confirmed" if agree else "estimated",
+            "date_confidence": "estimated",
+            "vendor_corroboration": "agreed" if agree else "single_source",
             "sources": ["finnhub"] + (["yfinance"] if agree else []),
             "disagreement": None,
         }
@@ -156,9 +152,9 @@ def main() -> int:
         "core": core, "monitor": monitor,
         "records": records, "failures": failures,
     })
-    nconf = sum(1 for r in records if r["date_confidence"] == "confirmed")
-    print(f"[ok] earnings records={len(records)} confirmed={nconf} "
-          f"estimated={len(records) - nconf} failures={len(failures)}")
+    nagree = sum(1 for r in records if r.get("vendor_corroboration") == "agreed")
+    print(f"[ok] earnings records={len(records)} vendor_agreed={nagree} "
+          f"estimated={len(records)} failures={len(failures)}")
     return 0
 
 

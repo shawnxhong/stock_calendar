@@ -47,16 +47,16 @@
 
 验收：离线、不带密钥即可完成编译、skill 校验和确定性测试。
 
-### P1 — 关键正确性修复
+### P1 — 关键正确性修复（已完成）
 
-- [ ] 用真实美股交易日历替代仅排除周末的月末/季末计算。
-- [ ] 解耦 FOMC 决议、SEP、发布会和纪要建模。
-- [ ] 将“两供应商一致”与“公司 IR confirmed”分开。
-- [ ] 增加不会被 normalize 覆盖的 enrichment/override 层。
-- [ ] 源整体失败时沿用上一份有效事件并显式标陈旧。
-- [ ] 修正重复宏观发布与真正 `MOVED` 的身份配对。
-- [ ] 将政策类 `manual_events` 规范化为 `policy`。
-- [ ] 补齐 BEA/Census，或在代码和验收范围中显式关闭未实现覆盖。
+- [x] 用真实美股交易日历替代仅排除周末的月末/季末计算。
+- [x] 解耦 FOMC 决议、SEP、发布会和纪要建模。
+- [x] 将“两供应商一致”与“公司 IR confirmed”分开。
+- [x] 增加不会被 normalize 覆盖的 enrichment/override 层。
+- [x] 源整体失败时沿用上一份有效事件并显式标陈旧。
+- [x] 修正重复宏观发布与真正 `MOVED` 的身份配对。
+- [x] 将政策类 `manual_events` 规范化为 `policy`。
+- [x] 补齐 BEA/Census 官方交叉验证与补缺层。
 
 验收：每个修复均有回归测试；失败场景不产生静默缺失。
 
@@ -117,3 +117,11 @@
 - 整理后的 16 个 Claude 业务文件与 ZIP 解包原件逐一 SHA-256 一致。
 - Python 编译检查通过；skill `quick_validate.py` 通过。
 - 本机离线基线测试 10/10 通过。首次运行有 1 条测试预期写错，核算后确认代码正确并修正测试：2026-08-12 最近季度末为 2026-06-30。
+- 创建基线提交 `e533819`（`chore: establish financial calendar baseline`）。
+- P1 新增标准库 NYSE 交易日历，处理常规整日休市和 Good Friday OPEX 回退；非常规休市走人工审计配置。
+- FOMC 发布会不再与 SEP 条件绑定；政策人工事件归类为 `policy`。
+- 两供应商一致只记 `vendor_corroboration: agreed`；公司 IR confirmed 必须经 `event_overrides.yaml` 保存来源和抓取时间。
+- 显式失败的源从上一份快照结转未来事件，并保留旧抓取时间与陈旧注记。
+- diff 不再把已发生的上期宏观数据与新一期错误配对为 `MOVED`。
+- 接入 BEA 官方 `release_dates.json` 与 Census 官方 Economic Indicator Calendar；只允许精确 `official_match` 白名单补缺。
+- P1 离线回归 21/21 通过；Python 编译与 skill 校验通过。

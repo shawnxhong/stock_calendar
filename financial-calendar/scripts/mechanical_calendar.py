@@ -17,12 +17,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from common import ET, et_to_utc, load_yaml, today_et
-
-US_MARKET_HOLIDAYS_NOTE = (
-    "月末/季末取最后一个工作日（周一至周五），未扣除美股假日。"
-    "若最后一个工作日恰为假日，实际最后交易日提前一天。"
-)
+from common import et_to_utc, load_yaml, today_et
+from market_calendar import last_trading_day, previous_trading_day
 
 
 # ── primitives ───────────────────────────────────────────────────────────────
@@ -35,11 +31,8 @@ def third_friday(year: int, month: int) -> dt.date:
 
 
 def last_bday(year: int, month: int) -> dt.date:
-    nxt = dt.date(year + 1, 1, 1) if month == 12 else dt.date(year, month + 1, 1)
-    d = nxt - dt.timedelta(days=1)
-    while d.weekday() >= 5:
-        d -= dt.timedelta(days=1)
-    return d
+    """Backward-compatible alias: return the actual final NYSE trading day."""
+    return last_trading_day(year, month)
 
 
 def quarter_end_anchor(d: dt.date) -> dt.date:
@@ -83,11 +76,12 @@ def _months_between(start: dt.date, end: dt.date):
 # ── event generation ─────────────────────────────────────────────────────────
 
 def _mk(key: str, label: str, date: dt.date, tier: str,
-        time_et: str | None, notes: list | None = None) -> dict:
+        time_et: str | None, notes: list | None = None,
+        kind: str = "mechanical") -> dict:
     iso, tconf = et_to_utc(date, time_et)
     return {
         "id": f"mech:{key}:{date.isoformat()}",
-        "kind": "mechanical",
+        "kind": kind,
         "label": label,
         "date_utc": iso,
         "tier": tier,
@@ -109,7 +103,7 @@ def generate(start: dt.date | None = None, days: int = 400) -> list[dict]:
     out: list[dict] = []
 
     for y, m in _months_between(start.replace(day=1), end):
-        tf = third_friday(y, m)
+        tf = previous_trading_day(third_friday(y, m))
         if start <= tf <= end:
             if m in (3, 6, 9, 12):
                 out.append(_mk("witching", "三重魔咒到期（季度）", tf, "B", "16:00"))
@@ -118,14 +112,12 @@ def generate(start: dt.date | None = None, days: int = 400) -> list[dict]:
             else:
                 out.append(_mk("opex", "月度期权到期（OPEX）", tf, "C", "16:00"))
 
-        lb = last_bday(y, m)
+        lb = last_trading_day(y, m)
         if start <= lb <= end:
             if m in (3, 6, 9, 12):
-                out.append(_mk("quarter_end", "季末最后一个交易日", lb, "B", "16:00",
-                               [US_MARKET_HOLIDAYS_NOTE]))
+                out.append(_mk("quarter_end", "季末最后一个交易日", lb, "B", "16:00"))
             else:
-                out.append(_mk("month_end", "月末最后一个交易日", lb, "C", "16:00",
-                               [US_MARKET_HOLIDAYS_NOTE]))
+                out.append(_mk("month_end", "月末最后一个交易日", lb, "C", "16:00"))
 
     for rec in cal.get("reconstitutions") or []:
         d = dt.date.fromisoformat(str(rec["date"]))
@@ -144,7 +136,8 @@ def generate(start: dt.date | None = None, days: int = 400) -> list[dict]:
         if start <= d <= end:
             out.append(_mk("manual", str(me.get("label", "人工事件")), d,
                            str(me.get("tier", "B")), me.get("time_et"),
-                           [me.get("note")] if me.get("note") else []))
+                           [me.get("note")] if me.get("note") else [],
+                           kind="policy"))
 
     return out
 

@@ -1,6 +1,6 @@
 ---
 name: financial-calendar
-description: Passive-push US financial calendar. Pulls official release schedules (FRED, BLS, TreasuryDirect), watchlist earnings dates with explicit confirmed/estimated confidence, and a pure-date-math mechanical calendar (OPEX, triple witching, month/quarter end, index reconstitution, buyback blackout), diffs them against the last snapshot to surface date changes, and renders monthly / weekly / daily briefs in both a short IM version and a long email version. Use this skill whenever the user or an agent asks to run the financial calendar, 财经日历, econ calendar, macro calendar, the monthly/weekly/daily brief, what's happening this week/month, upcoming FOMC or CPI or NFP dates, watchlist earnings dates, or to edit the calendar configs (events.yaml, watchlist.yaml, calendar.yaml, settings.yaml). Covers US macro and US-listed watchlist earnings only. It does NOT estimate flow magnitude or direction (CTA positioning, vol-control deleveraging, dealer gamma) — that lives in EEI.
+description: Passive-push US financial calendar. Pulls official release schedules (FRED, BLS, BEA, Census, TreasuryDirect), watchlist earnings dates with explicit confirmed/estimated confidence, and a pure-date-math mechanical calendar (OPEX, triple witching, month/quarter end, index reconstitution, buyback blackout), diffs them against the last snapshot to surface date changes, and renders monthly / weekly / daily briefs in both a short IM version and a long email version. Use this skill whenever the user or an agent asks to run the financial calendar, 财经日历, econ calendar, macro calendar, the monthly/weekly/daily brief, what's happening this week/month, upcoming FOMC or CPI or NFP dates, watchlist earnings dates, or to edit the calendar configs (events.yaml, watchlist.yaml, calendar.yaml, settings.yaml). Covers US macro and US-listed watchlist earnings only. It does NOT estimate flow magnitude or direction (CTA positioning, vol-control deleveraging, dealer gamma) — that lives in EEI.
 ---
 
 # 财经日历 — heads-up 系统
@@ -101,6 +101,8 @@ python scripts/run.py --tier=week --no-fetch   # 用缓存数据重渲染
 - **release_id 绝不手写**。由 `bootstrap_releases.py` 从 FRED 发现并留下可审计报告。
   写错一个 id = 永久漏掉一个 A 类事件且不报错
 - **`estimated` 财报不进"确定事件"块**。按幻觉日期布置头寸的代价远大于漏看一次财报
+- 两个供应商日期一致只记为 `vendor_corroboration: agreed`，仍是 `estimated`；
+  只有带公司 IR 来源和抓取时间的 `event_overrides.yaml` 才能升级为 `confirmed`
 - **回购静默期曲线是静态季节性近似，不是数据**。只能用日历语气表述
   （"本月企业回购受限"），不可作流量估计
 

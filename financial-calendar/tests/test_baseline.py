@@ -67,6 +67,12 @@ class MechanicalCalendarTests(unittest.TestCase):
         ids = [e["id"] for e in events]
         self.assertEqual(len(ids), len(set(ids)))
 
+    def test_market_holiday_month_end_and_good_friday_opex(self) -> None:
+        self.assertEqual(mechanical_calendar.last_bday(2027, 5), dt.date(2027, 5, 28))
+        events = mechanical_calendar.generate(dt.date(2025, 4, 1), 30)
+        opex = next(e for e in events if e["id"].startswith("mech:opex:"))
+        self.assertEqual(common.et_date(opex["date_utc"]), dt.date(2025, 4, 17))
+
 
 class DiffEngineTests(unittest.TestCase):
     def test_moved(self) -> None:
@@ -128,12 +134,13 @@ class NormalizationTests(unittest.TestCase):
 
 
 class EarningsTests(unittest.TestCase):
-    def test_vendor_agreement_baseline_is_confirmed(self) -> None:
+    def test_vendor_agreement_is_not_company_confirmation(self) -> None:
         result = fetch_earnings.reconcile(
             "TEST", [{"date": "2026-08-20", "hour": "amc"}],
             ["2026-08-20"], "conservative",
         )
-        self.assertEqual(result[0]["date_confidence"], "confirmed")
+        self.assertEqual(result[0]["date_confidence"], "estimated")
+        self.assertEqual(result[0]["vendor_corroboration"], "agreed")
 
 
 class RenderingTests(unittest.TestCase):

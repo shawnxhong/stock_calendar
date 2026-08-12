@@ -7,12 +7,19 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # FOMC 会议日程。美联储提前约一年公布，每年核实一次。
-# decision: 决议日（两日会议的第二天）。sep: true 表示当次含经济预测摘要/点阵图。
+# decision: 决议日（两日会议的第二天）。sep: true 表示含经济预测摘要/点阵图。
+# presser: 是否有主席新闻发布会；省略时按 true 处理，建议显式填写。
 # minutes: 该次会议纪要发布日（通常为会议后三周）。
 # ⚠ 下列日期为占位结构示例，实施前必须逐条核对 federalreserve.gov 官方日程。
 fomc_meetings: []
   # 格式：
-  # - {decision: "YYYY-MM-DD", sep: true,  minutes: "YYYY-MM-DD", note: ""}
+  # - {decision: "YYYY-MM-DD", sep: true, presser: true,
+  #    minutes: "YYYY-MM-DD", note: "", source: "https://...", verified: true}
+
+# NYSE 非常规整日休市。常规节假日由 market_calendar.py 计算；国丧等临时
+# 休市需在这里人工追加，并附交易所官方来源。
+market_closures: []
+  # - {date: "YYYY-MM-DD", label: "临时休市", source: "https://...", verified: true}
 
 # 指数再平衡生效日。再平衡交易在生效日收盘执行，提前 5 个交易日标记。
 # ⚠ FTSE Russell 自 2026 年起改为半年度重构（6 月 + 11 月）。

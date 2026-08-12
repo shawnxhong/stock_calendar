@@ -70,12 +70,17 @@ def doctor() -> int:
         ("BLS ICS", "https://www.bls.gov/schedule/news_release/bls.ics", None),
         ("TreasuryDirect", "https://www.treasurydirect.gov/TA_WS/securities/announced",
          {"format": "json", "type": "Bond"}),
+        ("BEA", "https://apps.bea.gov/API/signup/release_dates.json", None),
     ]
     for label, url, params in probes:
         as_json = label != "BLS ICS"
         r = http_get(url, params, retries=1, as_json=as_json)
         print(f"  {'✅' if r is not None else '❌'} {label}")
         ok &= r is not None
+    census = http_get("https://www.census.gov/economic-indicators/calendar-listview.html",
+                      retries=1, as_json=False)
+    print(f"  {'✅' if census else '❌'} Census calendar")
+    ok &= census is not None
     return 0 if ok else 1
 
 

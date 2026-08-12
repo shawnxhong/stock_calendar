@@ -1,0 +1,19 @@
+# 持久化、可审计的人工增强层。normalize.py 每次运行都会重新应用。
+#
+# 财报只有找到公司 IR 公告后才可升级为 confirmed；两个供应商日期一致仍是
+# estimated。共识与 nowcast 必须分别保存，且必须含来源与抓取时间。
+events: {}
+  # "earnings:NVDA:2026-08-26":
+  #   date_confidence: confirmed
+  #   confirmation:
+  #     source: "https://investor.nvidia.com/..."
+  #     fetched_at: "2026-08-12T10:00:00Z"
+  #   consensus:
+  #     value: "..."
+  #     source: "https://..."
+  #     fetched_at: "2026-08-12T10:05:00Z"
+  #   nowcast:
+  #     value: "..."
+  #     source: "https://..."
+  #     fetched_at: "2026-08-12T10:05:00Z"
+  #   notes: []
