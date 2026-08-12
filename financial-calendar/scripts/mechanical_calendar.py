@@ -129,6 +129,7 @@ def generate(start: dt.date | None = None, days: int = 400) -> list[dict]:
             notes.append("⚠ 日期未经核实，勿据此安排头寸")
         ev = _mk("recon", f"{rec.get('index', '指数')}成分股重构生效", d, "B", "16:00", notes)
         ev["date_confidence"] = "confirmed" if verified else "estimated"
+        ev["source"] = rec.get("source", ev["source"])
         out.append(ev)
 
     for me in cal.get("manual_events") or []:

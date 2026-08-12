@@ -120,6 +120,19 @@ def normalize_macro(raw, whitelist, conflicts):
         ev["source_key"] = "treasury"
         out.append(ev)
 
+    for source, rows in (("ISM official report calendar", raw.get("ism") or []),
+                         ("ADP official NER calendar", raw.get("adp") or [])):
+        for row in rows:
+            e = by_key.get(row.get("key"))
+            if not e:
+                continue
+            d = dt.date.fromisoformat(row["date"])
+            ev = _base(f"official:{row['key']}:{row['date']}", "macro",
+                       e["label"], d, e.get("tier", "B"),
+                       row.get("time_et") or e.get("time_et"), source, fetched)
+            ev["source_key"] = row["key"]
+            out.append(ev)
+
     man = raw.get("manual") or {}
     for m in man.get("fomc") or []:
         for field, key, label in (("decision", "fomc_decision", "FOMC 利率决议"),
@@ -130,15 +143,21 @@ def normalize_macro(raw, whitelist, conflicts):
             e = by_key.get(key, {})
             ev = _base(f"manual:{key}:{d.isoformat()}", "macro", label, d,
                        e.get("tier", "A"), e.get("time_et"),
-                       "calendar.yaml (人工核实)", fetched)
+                       m.get("source", "calendar.yaml (人工核实)"), fetched)
             ev["source_key"] = key
+            ev["date_confidence"] = "confirmed" if m.get("verified") else "estimated"
             if field == "decision" and m.get("sep"):
                 ev["label"] += "（含 SEP / 点阵图）"
             if field == "decision" and m.get("presser", True):
                 pres = by_key.get("fomc_presser", {})
-                out.append(_base(f"manual:fomc_presser:{d.isoformat()}", "macro",
-                                 "FOMC 主席新闻发布会", d, pres.get("tier", "A"),
-                                 pres.get("time_et"), "calendar.yaml (人工核实)", fetched))
+                presser = _base(f"manual:fomc_presser:{d.isoformat()}", "macro",
+                                "FOMC 主席新闻发布会", d, pres.get("tier", "A"),
+                                pres.get("time_et"),
+                                m.get("source", "calendar.yaml (人工核实)"), fetched)
+                presser["source_key"] = "fomc_presser"
+                presser["date_confidence"] = (
+                    "confirmed" if m.get("verified") else "estimated")
+                out.append(presser)
             if m.get("note"):
                 ev["notes"].append(str(m["note"]))
             out.append(ev)
@@ -150,8 +169,9 @@ def normalize_macro(raw, whitelist, conflicts):
         d = dt.date.fromisoformat(str(p["date"]))
         ev = _base(f"manual:{e['key']}:{d.isoformat()}", "macro", e["label"], d,
                    e.get("tier", "B"), e.get("time_et"),
-                   "calendar.yaml (人工录入)", fetched)
+                   p.get("source", "calendar.yaml (人工录入)"), fetched)
         ev["source_key"] = e["key"]
+        ev["date_confidence"] = "confirmed" if p.get("verified") else "estimated"
         if p.get("note"):
             ev["notes"].append(str(p["note"]))
         out.append(ev)
@@ -270,6 +290,7 @@ def carry_forward_failed_sources(events, previous, failures,
     failed = {(f.get("source"), f.get("key")) for f in failures}
     fred_all = any(src == "fred" and key is None for src, key in failed)
     treasury_failed = any(src == "treasury" for src, _ in failed)
+    official_failed = {src for src, _ in failed if src in ("ism", "adp")}
     earnings_failed = earnings_missing or any(src in ("finnhub", "earnings") for src, _ in failed)
     current_ids = {ev["id"] for ev in events}
 
@@ -283,6 +304,10 @@ def carry_forward_failed_sources(events, previous, failures,
         key = ev.get("source_key")
         if key == "treasury" or str(ev.get("source", "")).startswith("TreasuryDirect"):
             return treasury_failed
+        if (key == "adp" and "adp" in official_failed) or (
+                key in ("ism_manufacturing", "ism_services")
+                and "ism" in official_failed):
+            return True
         if str(ev.get("source", "")).startswith("FRED"):
             return fred_all or ("fred", key) in failed
         return False

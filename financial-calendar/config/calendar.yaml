@@ -11,10 +11,62 @@
 # presser: 是否有主席新闻发布会；省略时按 true 处理，建议显式填写。
 # minutes: 该次会议纪要发布日（通常为会议后三周）。
 # ⚠ 下列日期为占位结构示例，实施前必须逐条核对 federalreserve.gov 官方日程。
-fomc_meetings: []
-  # 格式：
-  # - {decision: "YYYY-MM-DD", sep: true, presser: true,
-  #    minutes: "YYYY-MM-DD", note: "", source: "https://...", verified: true}
+fomc_meetings:
+  - decision: "2026-01-28"
+    sep: false
+    presser: true
+    minutes: "2026-02-18"
+    source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm#42828"
+    source_checked_at: "2026-08-12"
+    verified: true
+  - decision: "2026-03-18"
+    sep: true
+    presser: true
+    minutes: "2026-04-08"
+    source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm#42828"
+    source_checked_at: "2026-08-12"
+    verified: true
+  - decision: "2026-04-29"
+    sep: false
+    presser: true
+    minutes: "2026-05-20"
+    source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm#42828"
+    source_checked_at: "2026-08-12"
+    verified: true
+  - decision: "2026-06-17"
+    sep: true
+    presser: true
+    minutes: "2026-07-08"
+    source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm#42828"
+    source_checked_at: "2026-08-12"
+    verified: true
+  - decision: "2026-07-29"
+    sep: false
+    presser: true
+    source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm#42828"
+    source_checked_at: "2026-08-12"
+    verified: true
+  - decision: "2026-09-16"
+    sep: true
+    presser: true
+    source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm#42828"
+    source_checked_at: "2026-08-12"
+    verified: true
+    note: "未来会议；纪要日期尚未由 Fed 公布，不作推算"
+  - decision: "2026-10-28"
+    sep: false
+    presser: true
+    source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm#42828"
+    source_checked_at: "2026-08-12"
+    verified: true
+    note: "未来会议；纪要日期尚未由 Fed 公布，不作推算"
+  - decision: "2026-12-09"
+    sep: true
+    presser: true
+    source: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm#42828"
+    source_checked_at: "2026-08-12"
+    verified: true
+    note: "未来会议；纪要日期尚未由 Fed 公布，不作推算"
 
 # NYSE 非常规整日休市。常规节假日由 market_calendar.py 计算；国丧等临时
 # 休市需在这里人工追加，并附交易所官方来源。
@@ -25,8 +77,10 @@ market_closures: []
 # ⚠ FTSE Russell 自 2026 年起改为半年度重构（6 月 + 11 月）。
 #   11 月日期在官方公布前为占位符，必须核实后才可信任。
 reconstitutions:
-  - {date: "2026-06-26", index: "Russell", verified: false,
-     note: "年度重构生效（收盘）—— 待核实"}
+  - {date: "2026-06-26", index: "Russell", verified: true,
+     source: "https://www.lseg.com/en/ftse-russell/russell-reconstitution",
+     source_checked_at: "2026-08-12",
+     note: "FTSE Russell 官方页面确认 2026-06-26 美股收盘后生效"}
   - {date: "2026-11-20", index: "Russell", verified: false,
      note: "占位符 —— 半年度重构，官方公布后必须核实"}
   # S&P 季度再平衡生效于三重魔咒周五，由脚本自动生成，此处无需录入。
@@ -52,7 +106,17 @@ buyback_blackout_curve:
 
 # 私营机构发布日程（FRED 无覆盖）。按季度人工补充。
 # key 必须与 config/events.yaml 中的 key 对应。
-private_releases: []
+private_releases:
+  - &umich_verified {key: umich, date: "2026-08-14", note: "初值", verified: true, source: "https://data.sca.isr.umich.edu/fetchdoc.php?docid=79628", source_checked_at: "2026-08-12"}
+  - {<<: *umich_verified, date: "2026-08-28", note: "终值"}
+  - {<<: *umich_verified, date: "2026-09-11", note: "初值"}
+  - {<<: *umich_verified, date: "2026-09-25", note: "终值"}
+  - {<<: *umich_verified, date: "2026-10-09", note: "初值"}
+  - {<<: *umich_verified, date: "2026-10-23", note: "终值"}
+  - {<<: *umich_verified, date: "2026-11-06", note: "初值"}
+  - {<<: *umich_verified, date: "2026-11-20", note: "终值"}
+  - {<<: *umich_verified, date: "2026-12-04", note: "初值"}
+  - {<<: *umich_verified, date: "2026-12-18", note: "终值"}
   # 格式：
   # - {key: ism_manufacturing, date: "YYYY-MM-DD"}
   # - {key: umich, date: "YYYY-MM-DD", note: "初值"}

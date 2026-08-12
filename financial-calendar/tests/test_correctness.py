@@ -32,6 +32,34 @@ class FomcTests(unittest.TestCase):
         labels = {e["label"] for e in normalize.normalize_macro(raw, whitelist, [])}
         self.assertEqual(labels, {"FOMC 利率决议", "FOMC 主席新闻发布会", "FOMC 会议纪要"})
 
+    def test_manual_verification_and_source_are_preserved(self) -> None:
+        source = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+        raw = {
+            "fetched_at": common.now_utc_iso(), "fred": {}, "treasury": [],
+            "manual": {"fomc": [{"decision": "2026-10-28", "presser": True,
+                                  "verified": True, "source": source}]},
+        }
+        whitelist = [
+            {"key": "fomc_decision", "tier": "A", "time_et": "14:00"},
+            {"key": "fomc_presser", "tier": "A", "time_et": "14:30"},
+        ]
+        events = normalize.normalize_macro(raw, whitelist, [])
+        self.assertTrue(all(e["date_confidence"] == "confirmed" for e in events))
+        self.assertTrue(all(e["source"] == source for e in events))
+        self.assertEqual({e["source_key"] for e in events},
+                         {"fomc_decision", "fomc_presser"})
+
+    def test_unverified_private_release_is_estimated(self) -> None:
+        raw = {
+            "fetched_at": common.now_utc_iso(), "fred": {}, "treasury": [],
+            "manual": {"private": [{"key": "umich", "date": "2026-08-14",
+                                     "verified": False}]},
+        }
+        whitelist = [{"key": "umich", "label": "Michigan", "tier": "B",
+                      "time_et": "10:00"}]
+        event = normalize.normalize_macro(raw, whitelist, [])[0]
+        self.assertEqual(event["date_confidence"], "estimated")
+
 
 class PolicyClassificationTests(unittest.TestCase):
     def test_manual_event_is_policy(self) -> None:
@@ -156,6 +184,106 @@ class OfficialScheduleTests(unittest.TestCase):
                          "datetime": "2026-09-30T12:30:00+00:00"}], "census": []}
         whitelist = [{"key": "gdp", "official_match": ["Gross Domestic Product"]}]
         self.assertEqual(normalize._official_schedule_index(raw, whitelist), {})
+
+    def test_parse_ism_official_calendar(self) -> None:
+        html = """
+        <table><thead><tr><th>Month</th><th>Manufacturing PMI</th>
+        <th>Services PMI</th></tr></thead><tbody>
+        <tr><th>September 2026</th><td>1</td><td>3</td></tr>
+        </tbody></table>
+        """
+        rows = fetch_macro.parse_ism_calendar(
+            html, dt.date(2026, 9, 1), dt.date(2026, 9, 30))
+        self.assertEqual(rows, [
+            {"key": "ism_manufacturing", "date": "2026-09-01",
+             "time_et": "10:00"},
+            {"key": "ism_services", "date": "2026-09-03",
+             "time_et": "10:00"},
+        ])
+
+    def test_parse_adp_stops_before_weekly_pulse_dates(self) -> None:
+        data = {"reportType": "NER", "futureReports": [
+            {"reportDate": "September 02, 2026"},
+            {"reportDate": ""},
+            {"reportDate": "Upcoming reports (weekly NER pulse):"},
+            {"reportDate": "September 09, 2026"},
+        ]}
+        rows = fetch_macro.parse_adp_calendar(
+            data, dt.date(2026, 9, 1), dt.date(2026, 9, 30))
+        self.assertEqual(rows, [
+            {"key": "adp", "date": "2026-09-02", "time_et": "08:15"},
+        ])
+
+    def test_official_private_rows_normalize_as_confirmed(self) -> None:
+        raw = {
+            "fetched_at": common.now_utc_iso(), "fred": {}, "treasury": [],
+            "ism": [{"key": "ism_services", "date": "2026-09-03",
+                     "time_et": "10:00"}],
+            "adp": [{"key": "adp", "date": "2026-09-02", "time_et": "08:15"}],
+            "manual": {},
+        }
+        whitelist = [
+            {"key": "ism_services", "label": "ISM Services", "tier": "B",
+             "time_et": "10:00"},
+            {"key": "adp", "label": "ADP", "tier": "B", "time_et": "08:15"},
+        ]
+        events = normalize.normalize_macro(raw, whitelist, [])
+        self.assertEqual({e["source_key"] for e in events},
+                         {"ism_services", "adp"})
+        self.assertTrue(all(e["date_confidence"] == "confirmed" for e in events))
+
+
+class DoctorSourceContractTests(unittest.TestCase):
+    def test_empty_census_table_is_failure_not_no_events(self) -> None:
+        original = fetch_macro.http_get
+        fetch_macro.http_get = lambda *args, **kwargs: b"<table id='calendar'></table>"
+        try:
+            rows = fetch_macro.census_schedule(dt.date(2026, 1, 1), dt.date(2026, 12, 31))
+        finally:
+            fetch_macro.http_get = original
+        self.assertIsNone(rows)
+
+    def test_ism_retries_with_same_session_after_sso_cookie_page(self) -> None:
+        html = b"""
+        <table><tr><th>Month</th><th>Manufacturing PMI</th><th>Services PMI</th></tr>
+        <tr><th>September 2026</th><td>1</td><td>3</td></tr></table>
+        """
+
+        class Response:
+            def __init__(self, content):
+                self.content = content
+
+            def raise_for_status(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.headers = {}
+                self.calls = 0
+
+            def get(self, *_args, **_kwargs):
+                self.calls += 1
+                return Response(b"<html>SSO cookie setup</html>" if self.calls == 1 else html)
+
+        with unittest.mock.patch("requests.Session", Session):
+            rows = fetch_macro.ism_schedule(
+                dt.date(2026, 9, 1), dt.date(2026, 9, 30))
+        self.assertEqual(len(rows), 2)
+
+
+class DotenvTests(unittest.TestCase):
+    def test_dotenv_loads_without_overriding_process_secret(self) -> None:
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / ".env"
+            path.write_text("FRED_API_KEY=file-value\nNEW_CAL_KEY='quoted'\n",
+                            encoding="utf-8")
+            with unittest.mock.patch.dict(
+                    os.environ, {"FRED_API_KEY": "process-value"}, clear=True):
+                common.load_dotenv(path)
+                self.assertEqual(os.environ["FRED_API_KEY"], "process-value")
+                self.assertEqual(os.environ["NEW_CAL_KEY"], "quoted")
 
 
 if __name__ == "__main__":

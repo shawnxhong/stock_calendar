@@ -46,7 +46,8 @@ description: Passive-push US financial calendar. Pulls official release schedule
 ## 一次性设置
 
 ```bash
-pip install requests pyyaml icalendar yfinance finnhub-python
+uv venv .venv
+uv pip install --python .venv/bin/python -r requirements-dev.txt
 
 export FRED_API_KEY=...        # https://fred.stlouisfed.org/docs/api/api_key.html
 export FINNHUB_API_KEY=...     # https://finnhub.io  免费层即可
@@ -59,10 +60,10 @@ python scripts/bootstrap_releases.py     # 发现 FRED release_id，只需跑一
 
 1. 阅读 `logs/bootstrap_report.md`，抽查 5 条 AUTO-ACCEPT（验收标准第 6 条）
 2. 处理 `config/events_review.yaml` 里的 ambiguous / not_found
-3. 填写 `config/calendar.yaml`：
-   - `fomc_meetings` —— **当前为空，不填则所有 FOMC 事件缺失**，按 federalreserve.gov 逐条核对
-   - `reconstitutions` —— 现有条目 `verified: false`，核实后改为 true
-   - `private_releases` —— ISM / 密歇根 / ADP，FRED 无覆盖，按季度补
+3. 审核 `config/calendar.yaml`：
+   - FOMC 2026 会议已按 Fed 官网核验；未来会议纪要日期在官方公布前不推算
+   - Russell 2026-06-26 已核验；2026-11-20 仍是隔离的未核实占位符
+   - 密歇根 2026 剩余日期来自官方 PDF；ISM / ADP 已改为官网机器日历
 4. 填写 `config/watchlist.yaml`（core / monitor，仅美国上市代码）
 
 ```bash

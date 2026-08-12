@@ -136,17 +136,17 @@ macro:
     match: ["Beige Book"]
     time_et: "14:00"
 
-  # 私营机构发布 —— FRED 无发布日程，走人工 YAML（config/calendar.yaml）
+  # 私营机构发布。ISM/ADP 走官网机器日历；密歇根走官方 PDF 人工审计。
   - key: ism_manufacturing
     label: "ISM 制造业 PMI"
     tier: B
-    source: manual
+    source: ism
     time_et: "10:00"
 
   - key: ism_services
     label: "ISM 服务业 PMI"
     tier: B
-    source: manual
+    source: ism
     time_et: "10:00"
 
   - key: umich
@@ -158,7 +158,7 @@ macro:
   - key: adp
     label: "ADP 就业"
     tier: B
-    source: manual
+    source: adp
     time_et: "08:15"
 
   # ── C 类 ───────────────────────────────────────────────────────────────────

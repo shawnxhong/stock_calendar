@@ -49,6 +49,8 @@ BLS 的 ICS 带**精确发布时点**，是静态时点表的交叉校验源。
 
 - 解析异常或 VEVENT 数量为 0 → 记入 failures
 - 冲突数量突然大增 → 可能是 BLS 改版或时点表过期，需人工核对
+- BLS 可能由 Akamai 对自动请求返回 403；不得伪装 UA 或绕过。系统记录源失败，
+  继续使用 FRED 日期与静态时点，并明确标注本次失去 BLS 时点交叉验证。
 
 ---
 
@@ -104,6 +106,19 @@ BLS 的 ICS 带**精确发布时点**，是静态时点表的交叉校验源。
 - `indicator.xml` 是已发布数据的 RSS，不是未来日程，不能代替 calendar list view。
 - HTML 解析只依赖 `table#calendar` 的语义字段；解析出零行即源失败并告警。
 
+## ISM — 官方 Report Calendar
+
+- `https://www.ismworld.org/supply-management-news-and-reports/reports/rob-report-calendar/`
+- 官方 HTML 表逐年列出 Manufacturing / Services PMI 日期，时点为 10:00 ET。
+- 首次访问会经 SSO host 设置匿名 session cookie；同一 session 第二次 GET 返回公开日历。
+- 解析为零行时记为源失败，不使用“首个/第三个工作日”自行推算。
+
+## ADP — 官方 NER JSON
+
+- `https://adpemploymentreport.com/ner_production.json`
+- `futureReports` 同时含月度 NER 与 weekly NER pulse；解析器遇到 weekly 标题即停止，
+  避免把每周 pulse 误当作月度 ADP 就业报告。
+
 ## 无 API 的部分（人工 YAML）
 
 以下没有可靠的机器可读源，全部走 `config/calendar.yaml`：
@@ -111,9 +126,7 @@ BLS 的 ICS 带**精确发布时点**，是静态时点表的交叉校验源。
 | 事件 | 说明 |
 |---|---|
 | FOMC 会议 / 纪要 / SEP | 美联储提前约一年公布，每年核实一次。**不填则全部缺失** |
-| ISM 制造/服务 PMI | 私营机构，FRED 无日程 |
-| 密歇根消费者信心 | 同上（初值 + 终值两次） |
-| ADP 就业 | 同上 |
+| 密歇根消费者信心 | 官方年度 PDF（初值 + 终值两次），按年人工审计 |
 | Russell / MSCI 重构 | 提前公布但需人工核实。⚠ FTSE Russell 自 2026 年起改半年度 |
 | 政策事件 | Jackson Hole、国会作证、立法截止日等 |
 

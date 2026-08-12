@@ -32,6 +32,32 @@ for _d in (DATA, SNAPSHOTS, LOGS):
     _d.mkdir(parents=True, exist_ok=True)
 
 
+def load_dotenv(path: Path | None = None) -> None:
+    """Load a local gitignored .env without overriding process secrets."""
+    env_path = path or ROOT.parent / ".env"
+    if not env_path.exists():
+        return
+    for lineno, raw in enumerate(env_path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if "=" not in line:
+            raise ValueError(f"invalid .env line {lineno}: expected NAME=VALUE")
+        name, value = line.split("=", 1)
+        name = name.strip()
+        if not name.replace("_", "").isalnum() or name[0].isdigit():
+            raise ValueError(f"invalid .env variable name on line {lineno}")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        os.environ.setdefault(name, value)
+
+
+load_dotenv()
+
+
 # ── config / io ──────────────────────────────────────────────────────────────
 
 def load_yaml(name: str) -> dict:

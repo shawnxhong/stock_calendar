@@ -51,6 +51,20 @@ def doctor() -> int:
     fomc = cal.get("fomc_meetings") or []
     print(f"  {'✅' if fomc else '⚠'} FOMC 日程：{len(fomc)} 场"
           + ("" if fomc else "  → calendar.yaml 中为空，A 类事件将缺失"))
+    ok &= bool(fomc)
+
+    verified_manual = [
+        *[("FOMC", r.get("decision"), r) for r in fomc if r.get("verified")],
+        *[("recon", r.get("date"), r) for r in (cal.get("reconstitutions") or [])
+          if r.get("verified")],
+        *[("private", r.get("date"), r) for r in (cal.get("private_releases") or [])
+          if r.get("verified")],
+    ]
+    unaudited = [(kind, date) for kind, date, row in verified_manual
+                 if not row.get("source") or not row.get("source_checked_at")]
+    print(f"  {'✅' if not unaudited else '❌'} 已核验人工事实审计字段："
+          f"{len(verified_manual) - len(unaudited)}/{len(verified_manual)} 完整")
+    ok &= not unaudited
     unverified = [r for r in (cal.get("reconstitutions") or [])
                   if not r.get("verified")]
     if unverified:
@@ -61,26 +75,53 @@ def doctor() -> int:
     ncore = len(wl.get("core") or [])
     nmon = len(wl.get("monitor") or [])
     print(f"  {'✅' if ncore + nmon else '⚠'} watchlist：core {ncore} / monitor {nmon}")
+    ok &= bool(ncore + nmon)
 
-    print("── 连通性 ──")
-    from common import http_get
-    probes = [
-        ("FRED", "https://api.stlouisfed.org/fred/releases",
-         {"api_key": os.environ.get("FRED_API_KEY", ""), "file_type": "json", "limit": 1}),
-        ("BLS ICS", "https://www.bls.gov/schedule/news_release/bls.ics", None),
-        ("TreasuryDirect", "https://www.treasurydirect.gov/TA_WS/securities/announced",
-         {"format": "json", "type": "Bond"}),
-        ("BEA", "https://apps.bea.gov/API/signup/release_dates.json", None),
-    ]
-    for label, url, params in probes:
-        as_json = label != "BLS ICS"
-        r = http_get(url, params, retries=1, as_json=as_json)
-        print(f"  {'✅' if r is not None else '❌'} {label}")
-        ok &= r is not None
-    census = http_get("https://www.census.gov/economic-indicators/calendar-listview.html",
-                      retries=1, as_json=False)
-    print(f"  {'✅' if census else '❌'} Census calendar")
-    ok &= census is not None
+    print("── 真实源解析 ──")
+    import datetime as dt
+    import fetch_macro
+
+    start = today_et()
+    end = start + dt.timedelta(days=400)
+
+    def report(label, rows, *, required=True):
+        nonlocal ok
+        good = rows is not None and len(rows) > 0
+        count = "n/a" if rows is None else str(len(rows))
+        print(f"  {'✅' if good else '❌'} {label}：{count} 条")
+        if required:
+            ok &= good
+
+    # BLS may return Akamai 403 on datacenter/residential IPs. This is still a
+    # failed cross-check and must remain visible, but FRED is the date backbone.
+    report("BLS ICS（时点交叉验证）", fetch_macro.bls_schedule(), required=False)
+    report("TreasuryDirect", fetch_macro.treasury_long_auctions(start, end))
+    report("BEA release_dates.json", fetch_macro.bea_schedule(start, end))
+    report("Census official calendar", fetch_macro.census_schedule(start, end))
+    report("ISM official report calendar", fetch_macro.ism_schedule(start, end))
+    report("ADP official NER calendar", fetch_macro.adp_schedule(start, end))
+
+    fred_key = os.environ.get("FRED_API_KEY")
+    if fred_key:
+        from common import http_get
+        fred = http_get("https://api.stlouisfed.org/fred/releases", {
+            "api_key": fred_key, "file_type": "json", "limit": 1,
+        }, retries=1)
+        good = isinstance(fred, dict) and bool(fred.get("releases"))
+        print(f"  {'✅' if good else '❌'} FRED 认证与 schema")
+        ok &= good
+    else:
+        print("  ⏭ FRED：缺少 FRED_API_KEY，未联网测试")
+
+    finnhub_key = os.environ.get("FINNHUB_API_KEY")
+    if finnhub_key:
+        from fetch_earnings import finnhub_earnings
+        rows = finnhub_earnings(finnhub_key, start, start + dt.timedelta(days=30), set())
+        good = rows is not None
+        print(f"  {'✅' if good else '❌'} Finnhub 认证与 schema")
+        ok &= good
+    else:
+        print("  ⏭ Finnhub：缺少 FINNHUB_API_KEY，未联网测试")
     return 0 if ok else 1
 
 

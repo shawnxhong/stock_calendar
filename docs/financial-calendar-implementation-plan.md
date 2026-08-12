@@ -60,24 +60,24 @@
 
 验收：每个修复均有回归测试；失败场景不产生静默缺失。
 
-### P2 — 本地密钥与真实联网验证
+### P2 — 本地密钥与真实联网验证（执行中）
 
 - [ ] 由 operator 在本机创建未入库 `.env`，设置 `FRED_API_KEY`、`FINNHUB_API_KEY`。
-- [ ] 扩充 `--doctor`：认证、schema、未来日期、合理事件数、陈旧度检查。
-- [ ] 单独验证 FRED、BLS ICS、TreasuryDirect、Finnhub、yfinance、BEA、Census。
+- [x] 扩充 `--doctor`：认证、schema、未来日期、合理事件数、陈旧度检查。
+- [ ] 单独验证 FRED、BLS ICS、TreasuryDirect、Finnhub、yfinance、BEA、Census、ISM、ADP。
 - [ ] 完成一次真实全链路运行和断网降级运行。
 - [ ] 保存脱敏的验证证据，不记录密钥。
 
 验收：每个源有成功证据；空响应、认证失败、超时和无事件可区分。
 
-### P3 — 人工权威配置与审计
+### P3 — 人工权威配置与审计（执行中）
 
 - [ ] 运行 bootstrap，处理 `events_review.yaml`，抽查 5 条 release ID。
-- [ ] 从 Federal Reserve 官方页面录入 FOMC 日程。
-- [ ] 从官方来源录入 ISM、密歇根、ADP。
-- [ ] 核实 Russell 2026 日期，移除或隔离占位符。
+- [x] 从 Federal Reserve 官方页面录入 FOMC 日程。
+- [x] 从官方来源录入 ISM、密歇根、ADP。
+- [x] 核实 Russell 2026-06-26；将 2026-11-20 保持为显式未核实占位符。
 - [ ] 填写 `watchlist.yaml`。
-- [ ] 建立财报 IR 确认和共识/nowcast 的审计字段。
+- [x] 建立财报 IR 确认和共识/nowcast 的审计字段。
 
 验收：所有人工事实含来源、抓取时间和核实状态；未核实条目不会伪装成 confirmed。
 
@@ -125,3 +125,16 @@
 - diff 不再把已发生的上期宏观数据与新一期错误配对为 `MOVED`。
 - 接入 BEA 官方 `release_dates.json` 与 Census 官方 Economic Indicator Calendar；只允许精确 `official_match` 白名单补缺。
 - P1 离线回归 21/21 通过；Python 编译与 skill 校验通过。
+- 创建 P1 提交 `56ca2d7`（`fix: harden calendar correctness and source validation`）。
+- 使用 `uv` 创建 repo 内 `.venv` 并安装锁定依赖；pandas/numpy 仅为 yfinance 传递依赖，核心代码不直接使用。
+- 隔离环境回归 22/22 通过。
+- 2026-08-12 真实公开源测试：TreasuryDirect 2 条、BEA 28 条、Census 65 条，schema 与未来窗口检查通过。
+- BLS ICS 由官方 Akamai 返回 403，浏览器 UA 亦无效；按安全策略不绕过，保留失败告警并继续以 FRED + 静态时点运行。
+- FRED/Finnhub 未测试：本机 `FRED_API_KEY`、`FINNHUB_API_KEY` 与 `.env` 均未配置。
+- 补齐开发依赖中的 pytest；本机隔离环境回归现为 29/29 通过。
+- 从 Fed 官方页面核验 2026 年 8 场 FOMC 决议；仅录入官方已公布的纪要日期，未来纪要不推算。
+- 从密歇根大学官方 2026 PDF 录入 8 月 14 日至 12 月 18 日的初值/终值日期。
+- 从 FTSE Russell 官方页面核验 2026-06-26 美股收盘后生效；11 月日期尚无官方公告，保留 `verified: false`。
+- 新增 ISM 官方 HTML 日历解析（未来 8 条）与 ADP 官网 `ner_production.json` 解析（未来 4 条），并排除 weekly NER pulse。
+- 所有 19 条 `verified: true` 人工事实已具备 `source` 与 `source_checked_at`，doctor 审计通过。
+- `.env` 现在由程序自动从 repo 根目录加载，且不会覆盖生产环境已注入的同名变量。
