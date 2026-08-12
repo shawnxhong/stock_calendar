@@ -43,7 +43,7 @@
 - [x] 添加 `.gitignore`、`.env.example` 和依赖声明。
 - [x] 将 Claude 已验证的行为固化为本机自动化测试。
 - [x] 运行 Python 编译检查和 skill `quick_validate.py`。
-- [ ] 初始化本地 Git 仓库并提交可追溯基线（计划在 P1 首次修复前完成）。
+- [x] 初始化本地 Git 仓库并提交可追溯基线。
 
 验收：离线、不带密钥即可完成编译、skill 校验和确定性测试。
 
@@ -62,7 +62,7 @@
 
 ### P2 — 本地密钥与真实联网验证（执行中）
 
-- [ ] 由 operator 在本机创建未入库 `.env`，设置 `FRED_API_KEY`、`FINNHUB_API_KEY`。
+- [ ] 由 operator 在本机创建未入库 `.env`，设置 `FRED_API_KEY`、`FINNHUB_API_KEY`（等待 operator 输入）。
 - [x] 扩充 `--doctor`：认证、schema、未来日期、合理事件数、陈旧度检查。
 - [ ] 单独验证 FRED、BLS ICS、TreasuryDirect、Finnhub、yfinance、BEA、Census、ISM、ADP。
 - [ ] 完成一次真实全链路运行和断网降级运行。
@@ -72,11 +72,11 @@
 
 ### P3 — 人工权威配置与审计（执行中）
 
-- [ ] 运行 bootstrap，处理 `events_review.yaml`，抽查 5 条 release ID。
+- [ ] 运行 bootstrap，处理 `events_review.yaml`，抽查 5 条 release ID（等待 FRED key）。
 - [x] 从 Federal Reserve 官方页面录入 FOMC 日程。
 - [x] 从官方来源录入 ISM、密歇根、ADP。
 - [x] 核实 Russell 2026-06-26；将 2026-11-20 保持为显式未核实占位符。
-- [ ] 填写 `watchlist.yaml`。
+- [ ] 填写 `watchlist.yaml`（等待 operator 提供 core / monitor 标的）。
 - [x] 建立财报 IR 确认和共识/nowcast 的审计字段。
 
 验收：所有人工事实含来源、抓取时间和核实状态；未核实条目不会伪装成 confirmed。
