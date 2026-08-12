@@ -1,0 +1,13 @@
+# Watchlist —— 仅美国上市代码（中概 ADR 与普通美股同源同处理）。
+# core:    持仓标的，财报全量推送（含短版）
+# monitor: 观察标的，仅在长版出现
+#
+# ⚠ 非美上市标的（A 股、港股）不在本 skill 范围内，录入也不会被拉取。
+
+core: []
+  # 例：
+  # - {ticker: GOOGL, note: ""}
+
+monitor: []
+  # 例：
+  # - {ticker: NVDA}

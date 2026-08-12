@@ -1,0 +1,18 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Runtime state and generated reports
+financial-calendar/data/*.json
+financial-calendar/data/snapshots/*.json
+financial-calendar/logs/*.md
+financial-calendar/config/release_ids.yaml
+financial-calendar/config/events_review.yaml
+
+# Keep empty runtime directories in source control
+!financial-calendar/data/.gitkeep
+!financial-calendar/data/snapshots/.gitkeep
+!financial-calendar/logs/.gitkeep
+

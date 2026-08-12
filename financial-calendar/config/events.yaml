@@ -1,0 +1,201 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# 事件白名单 —— 人工维护，脚本只读不写。
+#
+# 重要：release_id 不写在这里。它由 scripts/bootstrap_releases.py 从 FRED 发现
+# 后写入 config/release_ids.yaml（自动生成文件）。这样本文件的注释和分级永远
+# 不会被脚本覆盖。凭记忆手写 release_id 是本系统最容易埋下静默错误的地方。
+#
+# tier 语义：
+#   A = 可能改写市场 reaction function
+#   B = 稳态期定价输入
+#   C = 噪音，仅长版简报出现
+#
+# match: 用于与 FRED release 名称模糊匹配的候选串（不区分大小写）。
+# time_et: 发布时点（美东）。null 表示时点未知，简报只显示日期。
+# fred_series: 可选。用于拉取"前值"的 FRED series id。留空则简报不显示前值。
+# source: fred | bls_ics | treasury | manual
+# ─────────────────────────────────────────────────────────────────────────────
+
+macro:
+  # ── A 类 ───────────────────────────────────────────────────────────────────
+  - key: cpi
+    label: "CPI 消费者物价指数"
+    tier: A
+    source: fred
+    match: ["Consumer Price Index"]
+    time_et: "08:30"
+    fred_series: CPIAUCSL
+
+  - key: nfp
+    label: "非农就业报告"
+    tier: A
+    source: fred
+    match: ["Employment Situation"]
+    time_et: "08:30"
+    fred_series: PAYEMS
+
+  - key: pce
+    label: "个人收入与支出（含核心 PCE）"
+    tier: A
+    source: fred
+    match: ["Personal Income and Outlays"]
+    time_et: "08:30"
+    fred_series: PCEPILFE
+
+  - key: fomc_decision
+    label: "FOMC 利率决议"
+    tier: A
+    source: manual
+    time_et: "14:00"
+
+  - key: fomc_presser
+    label: "FOMC 主席新闻发布会"
+    tier: A
+    source: manual
+    time_et: "14:30"
+
+  - key: fomc_minutes
+    label: "FOMC 会议纪要"
+    tier: A
+    source: manual
+    time_et: "14:00"
+
+  - key: treasury_auction_long
+    label: "长端国债拍卖（10y/30y）"
+    tier: A
+    source: treasury
+    time_et: "13:00"
+
+  # ── B 类 ───────────────────────────────────────────────────────────────────
+  - key: ppi
+    label: "PPI 生产者物价指数"
+    tier: B
+    source: fred
+    match: ["Producer Price Index"]
+    time_et: "08:30"
+    fred_series: PPIFIS
+
+  - key: retail_sales
+    label: "零售销售"
+    tier: B
+    source: fred
+    match: ["Advance Monthly Sales for Retail and Food Services",
+            "Advance Monthly Retail Trade"]
+    time_et: "08:30"
+    fred_series: RSAFS
+
+  - key: jolts
+    label: "JOLTS 职位空缺"
+    tier: B
+    source: fred
+    match: ["Job Openings and Labor Turnover Survey"]
+    time_et: "10:00"
+    fred_series: JTSJOL
+
+  - key: jobless_claims
+    label: "初请失业金"
+    tier: B
+    source: fred
+    match: ["Unemployment Insurance Weekly Claims"]
+    time_et: "08:30"
+    fred_series: ICSA
+
+  - key: gdp
+    label: "GDP"
+    tier: B
+    source: fred
+    match: ["Gross Domestic Product"]
+    time_et: "08:30"
+    fred_series: GDPC1
+
+  - key: durable_goods
+    label: "耐用品订单"
+    tier: B
+    source: fred
+    match: ["Advance Report on Durable Goods"]
+    time_et: "08:30"
+    fred_series: DGORDER
+
+  - key: industrial_production
+    label: "工业产出"
+    tier: B
+    source: fred
+    match: ["Industrial Production and Capacity Utilization",
+            "G.17 Industrial Production"]
+    time_et: "09:15"
+    fred_series: INDPRO
+
+  - key: beige_book
+    label: "褐皮书"
+    tier: B
+    source: fred
+    match: ["Beige Book"]
+    time_et: "14:00"
+
+  # 私营机构发布 —— FRED 无发布日程，走人工 YAML（config/calendar.yaml）
+  - key: ism_manufacturing
+    label: "ISM 制造业 PMI"
+    tier: B
+    source: manual
+    time_et: "10:00"
+
+  - key: ism_services
+    label: "ISM 服务业 PMI"
+    tier: B
+    source: manual
+    time_et: "10:00"
+
+  - key: umich
+    label: "密歇根大学消费者信心"
+    tier: B
+    source: manual
+    time_et: "10:00"
+
+  - key: adp
+    label: "ADP 就业"
+    tier: B
+    source: manual
+    time_et: "08:15"
+
+  # ── C 类 ───────────────────────────────────────────────────────────────────
+  - key: trade_balance
+    label: "贸易帐"
+    tier: C
+    source: fred
+    match: ["U.S. International Trade in Goods and Services"]
+    time_et: "08:30"
+
+  - key: consumer_credit
+    label: "消费者信贷"
+    tier: C
+    source: fred
+    match: ["G.19 Consumer Credit", "Consumer Credit"]
+    time_et: "15:00"
+
+  - key: housing_starts
+    label: "新屋开工"
+    tier: C
+    source: fred
+    match: ["New Residential Construction"]
+    time_et: "08:30"
+
+  - key: existing_home_sales
+    label: "成屋销售"
+    tier: C
+    source: fred
+    match: ["Existing Home Sales"]
+    time_et: "10:00"
+
+  - key: empire_state
+    label: "纽约联储制造业调查"
+    tier: C
+    source: fred
+    match: ["Empire State Manufacturing Survey"]
+    time_et: "08:30"
+
+  - key: philly_fed
+    label: "费城联储制造业调查"
+    tier: C
+    source: fred
+    match: ["Manufacturing Business Outlook Survey"]
+    time_et: "08:30"

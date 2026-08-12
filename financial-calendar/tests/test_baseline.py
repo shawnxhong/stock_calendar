@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+import datetime as dt
+import importlib
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = SKILL_ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+import common  # noqa: E402
+import diff_engine  # noqa: E402
+import fetch_earnings  # noqa: E402
+import mechanical_calendar  # noqa: E402
+import normalize  # noqa: E402
+import render  # noqa: E402
+
+
+def event(event_id: str, day: dt.date, *, confidence: str = "confirmed") -> dict:
+    iso, time_confidence = common.et_to_utc(day, "08:30")
+    return {
+        "id": event_id,
+        "kind": "macro",
+        "label": "测试事件",
+        "date_utc": iso,
+        "tier": "A",
+        "time_confidence": time_confidence,
+        "date_confidence": confidence,
+        "source": "FRED release_id=10",
+        "source_fetched_at": common.now_utc_iso(),
+        "prior_value": None,
+        "consensus": None,
+        "nowcast": None,
+        "notes": [],
+    }
+
+
+class MechanicalCalendarTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.config_patch = mock.patch.object(common, "CONFIG", SKILL_ROOT / "config")
+        self.config_patch.start()
+        importlib.reload(mechanical_calendar)
+
+    def tearDown(self) -> None:
+        self.config_patch.stop()
+
+    def test_date_primitives(self) -> None:
+        self.assertEqual(mechanical_calendar.third_friday(2026, 8), dt.date(2026, 8, 21))
+        self.assertEqual(mechanical_calendar.last_bday(2026, 10), dt.date(2026, 10, 30))
+        self.assertEqual(
+            mechanical_calendar.quarter_end_anchor(dt.date(2026, 8, 12)),
+            dt.date(2026, 6, 30),
+        )
+
+    def test_witching_has_rebalance_and_ids_are_unique(self) -> None:
+        events = mechanical_calendar.generate(dt.date(2026, 9, 1), 40)
+        labels = {e["label"] for e in events if common.et_date(e["date_utc"]) == dt.date(2026, 9, 18)}
+        self.assertIn("三重魔咒到期（季度）", labels)
+        self.assertIn("标普指数季度再平衡生效", labels)
+        ids = [e["id"] for e in events]
+        self.assertEqual(len(ids), len(set(ids)))
+
+
+class DiffEngineTests(unittest.TestCase):
+    def test_moved(self) -> None:
+        old_day = common.today_et() + dt.timedelta(days=10)
+        new_day = old_day + dt.timedelta(days=1)
+        old = event(f"fred:10:{old_day.isoformat()}", old_day)
+        new = event(f"fred:10:{new_day.isoformat()}", new_day)
+        changes, pending = diff_engine.diff({"events": [old]}, {"events": [new]}, 2, {})
+        self.assertEqual([c["type"] for c in changes], ["MOVED"])
+        self.assertEqual(pending, {})
+
+    def test_confirmed(self) -> None:
+        day = common.today_et() + dt.timedelta(days=10)
+        event_id = f"earnings:TEST:{day.isoformat()}"
+        old = event(event_id, day, confidence="estimated")
+        new = event(event_id, day, confidence="confirmed")
+        changes, _ = diff_engine.diff({"events": [old]}, {"events": [new]}, 2, {})
+        self.assertEqual([c["type"] for c in changes], ["CONFIRMED"])
+
+    def test_stale_then_cancelled_then_silent(self) -> None:
+        day = common.today_et() + dt.timedelta(days=10)
+        old = event(f"fred:10:{day.isoformat()}", day)
+        changes1, pending1 = diff_engine.diff({"events": [old]}, {"events": []}, 2, {})
+        self.assertEqual(changes1[0]["type"], "STALE")
+        changes2, pending2 = diff_engine.diff({"events": []}, {"events": []}, 2, pending1)
+        self.assertEqual(changes2[0]["type"], "CANCELLED")
+        self.assertEqual(pending2, {})
+        changes3, pending3 = diff_engine.diff({"events": []}, {"events": []}, 2, pending2)
+        self.assertEqual(changes3, [])
+        self.assertEqual(pending3, {})
+
+
+class NormalizationTests(unittest.TestCase):
+    def test_bls_time_conflict_is_recorded(self) -> None:
+        raw = {
+            "fetched_at": common.now_utc_iso(),
+            "fred": {"cpi": {"release_id": 10, "dates": ["2026-08-20"]}},
+            "priors": {},
+            "bls": [{
+                "summary": "Consumer Price Index release",
+                "datetime": "2026-08-20T09:30:00-04:00",
+                "has_time": True,
+            }],
+            "treasury": [],
+            "manual": {},
+        }
+        whitelist = [{
+            "key": "cpi",
+            "label": "CPI",
+            "tier": "A",
+            "match": ["Consumer Price Index"],
+            "time_et": "08:30",
+        }]
+        conflicts: list[dict] = []
+        normalize.normalize_macro(raw, whitelist, conflicts)
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(conflicts[0]["static_table_et"], "08:30")
+        self.assertEqual(conflicts[0]["bls_ics_et"], "09:30")
+
+
+class EarningsTests(unittest.TestCase):
+    def test_vendor_agreement_baseline_is_confirmed(self) -> None:
+        result = fetch_earnings.reconcile(
+            "TEST", [{"date": "2026-08-20", "hour": "amc"}],
+            ["2026-08-20"], "conservative",
+        )
+        self.assertEqual(result[0]["date_confidence"], "confirmed")
+
+
+class RenderingTests(unittest.TestCase):
+    def test_estimated_earnings_not_in_confirmed_week_schedule(self) -> None:
+        day = common.today_et() + dt.timedelta(days=1)
+        iso, time_confidence = common.et_to_utc(day, "16:30")
+        estimated = {
+            "id": f"earnings:TEST:{day.isoformat()}",
+            "kind": "earnings",
+            "label": "TEST 财报（盘后）",
+            "date_utc": iso,
+            "tier": "B",
+            "time_confidence": time_confidence,
+            "date_confidence": "estimated",
+            "source": "finnhub",
+            "source_fetched_at": common.now_utc_iso(),
+            "watchlist": "core",
+            "prior_value": None,
+            "consensus": None,
+            "nowcast": None,
+            "notes": [],
+        }
+        cfg = common.load_yaml("settings.yaml")
+        doc = {
+            "events": [estimated],
+            "failures": [],
+            "source_fetched_at": {"macro": common.now_utc_iso()},
+            "blackout_profile": {},
+        }
+        output = render.render_week(doc, [], cfg, short=False)
+        schedule, possible = output.split("## ❓ 可能落在本周（日期未确认）")
+        self.assertNotIn("TEST 财报", schedule)
+        self.assertIn("TEST 财报", possible)
+
+    def test_all_short_renderers_respect_line_cap(self) -> None:
+        cfg = common.load_yaml("settings.yaml")
+        start = common.today_et()
+        events = [event(f"manual:test{i}:{(start + dt.timedelta(days=i % 5)).isoformat()}",
+                        start + dt.timedelta(days=i % 5)) for i in range(30)]
+        doc = {
+            "events": events,
+            "failures": [],
+            "source_fetched_at": {"macro": common.now_utc_iso()},
+            "blackout_profile": {},
+        }
+        for renderer in (render.render_day, render.render_week, render.render_month):
+            with self.subTest(renderer=renderer.__name__):
+                output = renderer(doc, [], cfg, short=True)
+                self.assertLessEqual(len(output.rstrip().splitlines()), 15)
+
+
+class NoKeyTests(unittest.TestCase):
+    def test_env_key_missing_exits_cleanly(self) -> None:
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(SystemExit) as ctx:
+                common.env_key("FRED_API_KEY")
+        self.assertEqual(ctx.exception.code, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

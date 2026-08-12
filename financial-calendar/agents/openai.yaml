@@ -1,0 +1,5 @@
+interface:
+  display_name: "Financial Calendar"
+  short_description: "Track US macro, earnings, and calendar changes"
+  default_prompt: "Use $financial-calendar to generate the next US financial-calendar brief and surface any schedule changes first."
+

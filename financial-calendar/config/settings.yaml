@@ -1,0 +1,38 @@
+# 财经日历 skill —— 运行参数
+
+timezones:
+  primary: "America/New_York"    # ET
+  secondary: "Asia/Shanghai"     # 北京时间
+  # 两个时区并排显示。绝不手写 UTC 偏移 —— 夏令时切换会静默错 1 小时。
+
+horizon_days:
+  month: 45      # 月度全景向前看的天数
+  week: 9        # 周度清单（周日发，覆盖到下周一）
+  day: 2         # 日度 T-1（今天 + 明天）
+
+short_version:
+  max_lines: 15  # IM 短版硬上限
+
+consensus:
+  top_n: 5       # 每周检索共识值的事件数上限（按 tier 排序）
+
+tiers:
+  # 各档简报纳入的最低分级
+  month: [A, B]
+  week: [A, B, C]     # C 类仅出现在长版
+  day: [A, B, C]
+
+staleness:
+  warn_days: 1       # 数据陈旧超过此天数在简报顶部标注
+  degrade_days: 3    # 超过此天数降级为"仅历史快照"
+  miss_before_cancel: 2   # 连续缺失几次才判定 CANCELLED（抗抖动）
+
+fred:
+  # 拉取窗口：从今天起向前 N 天
+  lookahead_days: 400
+  # 前值回看：拉取最近 N 个观测取最新
+  observation_limit: 2
+
+earnings:
+  # 两源不一致时的处理：conservative = 取更晚的日期
+  disagreement_policy: conservative
