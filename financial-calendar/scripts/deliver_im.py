@@ -1,0 +1,126 @@
+"""Deterministic IM delivery dispatcher.
+
+Reads the latest report + health.json produced by run.py and delivers the
+short IM version to the configured channels (Feishu, WeChat) via `hermes send`.
+Per-channel idempotency is recorded in DATA/im_delivery.json so a partially
+failed fan-out retries only the failed channels on the next poll.
+
+    python scripts/deliver_im.py             # deliver pending channels
+    python scripts/deliver_im.py --dry-run   # print what WOULD be sent, send nothing
+"""
+from __future__ import annotations
+
+import argparse
+import subprocess
+from pathlib import Path
+
+from common import DATA, load_yaml, now_utc_iso, read_json, write_json
+
+LEDGER = DATA / "im_delivery.json"
+_BANNER_MARK = "⚠"
+
+
+def _cfg() -> dict:
+    c = load_yaml("delivery.yaml")
+    return {"channels": c.get("channels") or [],
+            "alerts": c.get("alert_channels") or []}
+
+
+def load_ledger() -> dict:
+    return read_json(LEDGER, {}) or {}
+
+
+def save_ledger(ledger: dict) -> None:
+    write_json(LEDGER, ledger)
+
+
+def channel_done(ledger: dict, key: str, channel: str) -> bool:
+    entry = (ledger.get(key) or {}).get(channel)
+    return bool(entry and entry.get("status") == "ok")
+
+
+def hermes_send(target: str, text: str) -> bool:
+    """Send text to a Hermes channel. True iff exit code 0."""
+    proc = subprocess.run(
+        ["hermes", "send", "--to", target, "--quiet", text],
+        capture_output=True, text=True, timeout=60)
+    return proc.returncode == 0
+
+
+def _alert_text(health: dict) -> str:
+    tier = health.get("tier", "?")
+    fails = health.get("failures") or []
+    lines = [f"⚠️ 财经日历（{tier}）运行异常，未发送常规简报", ""]
+    for f in fails[:5]:
+        lines.append(f"  - {f.get('source', 'unknown')}: {f.get('reason', '')}")
+    lines += ["", f"checked_at {health.get('checked_at', '?')}"]
+    return "\n".join(lines)
+
+
+def _short_path(health: dict) -> Path | None:
+    for p in health.get("outputs") or []:
+        if p.endswith("-short.md"):
+            return Path(p)
+    return None
+
+
+def _fan_out(entries: list[dict], ledger: dict, key: str, text: str,
+             dry_run: bool) -> list[str]:
+    """Deliver text to each pending channel; return failed channel names."""
+    failed = []
+    for ch in entries:
+        name, target = ch["name"], ch.get("target") or ch["name"]
+        if channel_done(ledger, key, name):
+            continue
+        if dry_run:
+            print(f"[dry-run] -> {name} ({target}):\n{text}\n")
+            continue
+        if hermes_send(target, text):
+            ledger.setdefault(key, {})[name] = {"status": "ok", "at": now_utc_iso()}
+            print(f"[ok] {key} -> {name}")
+        else:
+            ledger.setdefault(key, {})[name] = {"status": "failed", "at": now_utc_iso()}
+            failed.append(name)
+            print(f"[fail] {key} -> {name}")
+    return failed
+
+
+def dispatch(health: dict, cfg: dict, ledger: dict, dry_run: bool) -> int:
+    """Apply health gating and fan out. Mutates ledger; returns exit code."""
+    status = health.get("status", "healthy")
+
+    if status == "unhealthy":
+        key = "alert:" + health.get("checked_at", "unknown")
+        _fan_out(cfg["alerts"], ledger, key, _alert_text(health), dry_run)
+        return 0
+
+    short = _short_path(health)
+    if not short or not short.exists():
+        return 0
+
+    text = short.read_text(encoding="utf-8").strip()
+    if status == "degraded" and _BANNER_MARK not in text[:200]:
+        text = "⚠ 部分数据源异常，简报可能不完整\n\n" + text
+
+    key = (health.get("delivery") or {}).get("idempotency_key") or short.stem
+    failed = _fan_out(cfg["channels"], ledger, key, text, dry_run)
+    return 1 if failed else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args(argv)
+
+    health = read_json(DATA / "health.json", {}) or {}
+    if not health:
+        return 0
+    cfg = _cfg()
+    ledger = load_ledger()
+    code = dispatch(health, cfg, ledger, args.dry_run)
+    save_ledger(ledger)
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
