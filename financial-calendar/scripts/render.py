@@ -20,7 +20,7 @@ import resonance  # noqa: E402
 from common import (DATA, WEEKDAY_CN, et_date, fmt_dual, parse_utc,  # noqa: E402
                     read_json, settings, tier_rank, today_et)
 
-TIER_MARK = {"A": "🔴 A", "B": "🟡 B", "C": "⚪ C"}
+TIER_MARK = {"A": "🔴 重要", "B": "🟡 中等", "C": "⚪ 次要"}
 CHANGE_MARK = {"MOVED": "⚠ 改期", "CANCELLED": "⚠ 取消", "CONFIRMED": "✅ 已确认",
                "NEW": "＋ 新增", "STALE": "… 源中缺失"}
 
@@ -175,7 +175,7 @@ def render_month(doc, changes, cfg, short: bool) -> str:
     L += _changes_block(changes, limit=2 if short else None, compact=short)
 
     a_events = [e for e in conf if e["tier"] == "A"]
-    L += ["## 🔴 本月 A 类事件", ""]
+    L += ["## 🔴 本月重要事件", ""]
     L += [_line(e, short) for e in a_events] or ["- （无）"]
     L += [""]
 
