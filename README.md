@@ -14,17 +14,19 @@
 - 保存快照并检测 `NEW`、`MOVED`、`STALE`、`CANCELLED`、`CONFIRMED`。
 - 输出 ET 与北京时间双时区的长版邮件和不超过 15 行的 IM 短版。
 - 数据源失败时沿用有效快照并显示显著警报，避免静默缺失。
+- 短版经 IM 投递层推送到飞书+微信：按 `health.json` 门控、内容幂等、逐渠道独立记账与正文存档。
 
 ## 目录
 
 ```text
 financial-calendar/
-  config/       事件白名单、人工日历、watchlist、运行设置
-  scripts/      抓取、归一化、diff、渲染与运行入口
+  config/       事件白名单、人工日历、watchlist、投递渠道、运行设置
+  scripts/      抓取、归一化、diff、渲染、IM 投递分发与运行入口
   tests/        确定性与故障演练测试
   references/   数据源说明与已知限制
   data/         运行状态和快照（gitignored）
   logs/         生成的简报（gitignored）
+deploy/         systemd units 与 Hermes 投递 wrapper
 docs/           设计、实施计划和生产迁移说明
 ```
 
@@ -81,6 +83,23 @@ FINCAL_DELIVERY_DIR="$PWD/runtime/shadow-delivery" \
 
 同一天、同一 tier、同一渲染内容只投递一次；只有 adapter 成功后才写入投递状态。
 
+### IM 投递（飞书 + 微信）
+
+`scripts/deliver_im.py` 读取 `health.json` 与最新短版，把简报投递到
+`config/delivery.yaml` 里配置的渠道（试运行：飞书 + 微信），并逐渠道记账：
+
+```bash
+.venv/bin/python financial-calendar/scripts/deliver_im.py            # 投递未完成的渠道
+.venv/bin/python financial-calendar/scripts/deliver_im.py --dry-run  # 只打印，不发送
+```
+
+- 门控：`unhealthy` 只发故障告警（飞书+telegram）、`degraded` 透传 render 内置降级横幅。
+- 幂等：`runtime/data/im_delivery.json` 记「幂等键 × 渠道」，部分失败只重试失败渠道。
+- 存档：每条成功消息正文写入 `runtime/im-delivery/{key}-{channel}.md`。
+
+生产调度由 Hermes `no_agent` cron 每 30 分钟轮询（wrapper 见
+`deploy/hermes/fincal_deliver.sh`）。
+
 ## 验证
 
 ```bash
@@ -89,14 +108,18 @@ FINCAL_DELIVERY_DIR="$PWD/runtime/shadow-delivery" \
 python3 /home/hong/.codex/skills/.system/skill-creator/scripts/quick_validate.py financial-calendar
 ```
 
-当前本地回归包含 65 个测试，覆盖日期数学、DST、源失败、快照恢复、diff、防抖、
-短版上限和重复运行幂等。
+当前本地回归包含 75 个测试，覆盖日期数学、DST、源失败、快照恢复、diff、防抖、
+短版上限、重复运行幂等和 IM 投递门控/幂等/存档。
 
 ## 上线边界
 
-本环境现作为目标生产主机，但当前只允许 shadow 文件投递。`deploy/systemd/` 提供按
-纽约时区运行的 day/week/month user timers；安装脚本会先执行 doctor，因此空
-watchlist 或配置缺口会阻止启用。正式外部投递前仍必须完成 14 天并行验收。
+本环境现作为目标生产主机，处于 14 天并行验收（约 2026-08-28 结束）。当前已启用：
+
+- `deploy/systemd/`：纽约时区的 day/week/month user timers 跑确定性流水线，产出简报、
+  `health.json` 与 shadow 文件投递；安装脚本会先执行 doctor，空 watchlist 或配置缺口会阻止启用。
+- Hermes `no_agent` cron：每 30 分钟轮询，把短版投递到飞书 + 微信（试运行渠道）。
+
+验收通过前不扩展到全量多渠道；若日后让 Hermes 接管调度，须先关闭现有 systemd timers。
 持久状态、调度、投递和回退要求见
 [生产迁移清单](docs/production-migration.md)。
 
