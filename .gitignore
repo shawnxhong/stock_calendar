@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.hermes/
 runtime/
 
 # Runtime state and generated reports
