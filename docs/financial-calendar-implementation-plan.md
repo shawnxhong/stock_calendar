@@ -104,7 +104,7 @@
 - [x] 抽象 `Scheduler`、`SecretProvider`、`StateStore`、`DeliveryAdapter`、`HealthReporter`。
 - [x] 生产环境 doctor 与真实 watchlist 的 month/week/day shadow dry-run 已完成。
 - [x] 增加内容幂等、成功后落状态、并发锁、原子写入、health.json 与 systemd user timers。
-- [ ] 配置真实投递和回退方案。
+- [x] 试运行投递已配置（飞书+微信短版 + 幂等账本 + health 门控，2026-08-15）；正式全量多渠道待 14 天验收通过。
 
 验收：核心代码不依赖 Hermes API、目录或消息格式；生产 secrets 不复用本地文件。
 
@@ -169,3 +169,22 @@
 - 修复后真实运行仍为 29 条财报、23/23 标的覆盖，跨季度 disagreement 由误报降为 0；
   systemd service 再次以 `Result=success` 完成，同内容日报跳过重复投递。
 - 回归测试增至 65/65；编译和 Skill 校验通过。
+
+### 2026-08-15（Hermes 接管试运行投递）
+
+- 建立可回滚基线 commit `bef96cb`（`feat: reach shadow-run production baseline`，26 文件 +953/−182）。
+- 解决 skill 命名冲突：金十 MCP 财经日历摘要改名 `jin10-financial-calendar`
+  （目录 + frontmatter + 周日 cron `6ac579609040` 引用），本 skill 改名
+  `us-stock-financial-calendar`（仅 frontmatter，目录保持 `financial-calendar/`）。
+- 新增确定性 IM 投递适配层：`config/delivery.yaml`（飞书+微信渠道、告警通道）、
+  `scripts/deliver_im.py`（读 health.json → 门控 → 逐渠道 `hermes send` → 记账）、
+  `tests/test_delivery.py`（9 用例）。详见
+  `.hermes/plans/2026-08-15_222604-im-delivery-adapter.md`。
+- 实现「幂等键 × 渠道」独立记账 `runtime/data/im_delivery.json`；unhealthy 只发告警
+  到飞书+telegram、degraded 透传 render 内置降级横幅、部分失败只重试失败渠道。
+- 部署 `no_agent` cron `0fb704e6fad7`（`*/30 * * * *`，`deliver=local`，wrapper
+  `deploy/hermes/fincal_deliver.sh` + `~/.hermes/scripts/fincal_deliver.sh` shim）。
+- 冒烟测试：飞书+微信均真实收到；重复运行静默幂等；cron 已 resume，待周一
+  systemd 产出后自动投递。
+- 渲染优化：tier 标签改中文（🔴 重要 / 🟡 中等 / ⚪ 次要），月度标题同步。
+- 回归 74/74；编译与 Skill 校验通过。BLS ICS 403 维持 degraded 降级，按现状不处理。
