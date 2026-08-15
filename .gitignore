@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+runtime/
 
 # Runtime state and generated reports
 financial-calendar/data/*.json
@@ -15,4 +16,3 @@ financial-calendar/config/events_review.yaml
 !financial-calendar/data/.gitkeep
 !financial-calendar/data/snapshots/.gitkeep
 !financial-calendar/logs/.gitkeep
-

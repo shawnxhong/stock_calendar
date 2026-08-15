@@ -13,7 +13,7 @@
 # match: 用于与 FRED release 名称模糊匹配的候选串（不区分大小写）。
 # time_et: 发布时点（美东）。null 表示时点未知，简报只显示日期。
 # fred_series: 可选。用于拉取"前值"的 FRED series id。留空则简报不显示前值。
-# source: fred | bls_ics | treasury | manual
+# source: fred | census | treasury | ism | adp | manual
 # ─────────────────────────────────────────────────────────────────────────────
 
 macro:
@@ -98,7 +98,7 @@ macro:
     label: "初请失业金"
     tier: B
     source: fred
-    match: ["Unemployment Insurance Weekly Claims"]
+    match: ["Unemployment Insurance Weekly Claims Report"]
     time_et: "08:30"
     fred_series: ICSA
 
@@ -114,9 +114,8 @@ macro:
   - key: durable_goods
     label: "耐用品订单"
     tier: B
-    source: fred
-    match: ["Advance Report on Durable Goods"]
-    official_match: ["Advance Monthly Manufacturers' Shipments, Inventories, and Orders"]
+    source: census
+    official_match: ["Advance Report on Durable Goods--Manufacturers' Shipments, Inventories, and Orders"]
     time_et: "08:30"
     fred_series: DGORDER
 
@@ -132,8 +131,7 @@ macro:
   - key: beige_book
     label: "褐皮书"
     tier: B
-    source: fred
-    match: ["Beige Book"]
+    source: manual
     time_et: "14:00"
 
   # 私营机构发布。ISM/ADP 走官网机器日历；密歇根走官方 PDF 人工审计。

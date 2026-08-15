@@ -125,8 +125,12 @@ def normalize_macro(raw, whitelist, conflicts):
         e = by_key.get("treasury_auction_long", {})
         ev = _base(f"treasury:{row['term'].replace(' ', '')}:{row['date']}", "macro",
                    f"{row['term']} 国债拍卖", d, e.get("tier", "A"),
-                   e.get("time_et"), "TreasuryDirect announced", fetched)
+                   e.get("time_et"), row.get("source", "TreasuryDirect announced"),
+                   fetched)
         ev["source_key"] = "treasury"
+        if row.get("tentative"):
+            ev["date_confidence"] = "estimated"
+            ev["notes"].append("财政部官方 tentative schedule；正式公告后确认")
         out.append(ev)
 
     for source, rows in (("ISM official report calendar", raw.get("ism") or []),
@@ -248,6 +252,7 @@ def normalize_earnings(raw):
                    "B", time_et, "+".join(r.get("sources") or ["vendor"]), fetched)
         ev["date_confidence"] = r.get("date_confidence", "estimated")
         ev["vendor_corroboration"] = r.get("vendor_corroboration", "single_source")
+        ev["ticker"] = r["ticker"]
         ev["watchlist"] = "core" if r["ticker"] in core else "monitor"
         if r.get("notes_hint"):
             ev["notes"].append(r["notes_hint"])
@@ -304,12 +309,21 @@ def carry_forward_failed_sources(events, previous, failures,
     fred_all = any(src == "fred" and key is None for src, key in failed)
     treasury_failed = any(src == "treasury" for src, _ in failed)
     official_failed = {src for src, _ in failed if src in ("ism", "adp")}
-    earnings_failed = earnings_missing or any(src in ("finnhub", "earnings") for src, _ in failed)
+    earnings_sources = {"finnhub", "yfinance", "earnings"}
+    earnings_failed = earnings_missing or any(
+        src in earnings_sources and key is None for src, key in failed)
+    earnings_failed_tickers = {
+        key for src, key in failed if src in earnings_sources and key is not None
+    }
     current_ids = {ev["id"] for ev in events}
 
     def affected(ev):
         if ev.get("kind") == "earnings":
-            return earnings_failed
+            ticker = ev.get("ticker")
+            if not ticker:
+                parts = str(ev.get("id") or "").split(":", 2)
+                ticker = parts[1] if len(parts) == 3 else None
+            return earnings_failed or ticker in earnings_failed_tickers
         if ev.get("kind") != "macro":
             return False
         if macro_missing:
@@ -343,6 +357,7 @@ def main() -> int:
 
     macro_raw = read_json(DATA / "raw_macro.json")
     earn_raw = read_json(DATA / "raw_earnings.json")
+    fetch_status = read_json(DATA / "fetch_status.json", {}) or {}
 
     events = []
     events += normalize_macro(macro_raw, wl, conflicts)
@@ -351,12 +366,15 @@ def main() -> int:
         today_et(), int(cfg["fred"]["lookahead_days"]))
     failures = list((macro_raw or {}).get("failures") or [])
     failures += list((earn_raw or {}).get("failures") or [])
+    failures += list(fetch_status.get("failures") or [])
+    failed_steps = {f.get("source") for f in fetch_status.get("failures") or []}
 
     # Carry old facts before applying overrides, so audited enrichment also
     # remains deterministic on a degraded run.
     events = carry_forward_failed_sources(
         events, latest_snapshot(), failures,
-        macro_missing=not bool(macro_raw), earnings_missing=not bool(earn_raw))
+        macro_missing=not bool(macro_raw) or "macro_fetch" in failed_steps,
+        earnings_missing=not bool(earn_raw) or "earnings_fetch" in failed_steps)
     events = apply_overrides(events, load_yaml("event_overrides.yaml"))
 
     # Deduplicate by id, keeping the first occurrence.

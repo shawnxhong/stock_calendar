@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import io
 import sys
 import unittest
 from pathlib import Path
@@ -148,6 +149,37 @@ class DiffIdentityTests(unittest.TestCase):
 
 
 class OfficialScheduleTests(unittest.TestCase):
+    def test_treasury_filter_excludes_twenty_year_auction(self) -> None:
+        rows = [
+            {"auctionDate": "2026-08-19", "securityTerm": "20-Year",
+             "securityType": "Note", "cusip": "A"},
+            {"auctionDate": "2026-08-20", "securityTerm": "30-Year",
+             "securityType": "Bond", "cusip": "B"},
+        ]
+        with unittest.mock.patch.object(
+                fetch_macro, "http_get", side_effect=[rows, [], None]):
+            result = fetch_macro.treasury_long_auctions(
+                dt.date(2026, 8, 1), dt.date(2026, 8, 31))
+        self.assertEqual([row["term"] for row in result], ["30-Year"])
+
+    def test_parse_treasury_tentative_filters_tips_and_other_tenors(self) -> None:
+        xml = """<AuctionCalendar>
+          <AuctionCalendarDate><SecurityTermWeekYear>10-Year</SecurityTermWeekYear>
+            <SecurityType>NOTE</SecurityType><TIPS>N</TIPS>
+            <AuctionDate>2026-09-09</AuctionDate></AuctionCalendarDate>
+          <AuctionCalendarDate><SecurityTermWeekYear>10-Year</SecurityTermWeekYear>
+            <SecurityType>NOTE</SecurityType><TIPS>Y</TIPS>
+            <AuctionDate>2026-09-17</AuctionDate></AuctionCalendarDate>
+          <AuctionCalendarDate><SecurityTermWeekYear>20-Year</SecurityTermWeekYear>
+            <SecurityType>BOND</SecurityType><TIPS>N</TIPS>
+            <AuctionDate>2026-09-23</AuctionDate></AuctionCalendarDate>
+        </AuctionCalendar>"""
+        result = fetch_macro.parse_treasury_tentative(
+            xml, dt.date(2026, 9, 1), dt.date(2026, 9, 30))
+        self.assertEqual([(row["term"], row["date"]) for row in result],
+                         [("10-Year", "2026-09-09")])
+        self.assertTrue(result[0]["tentative"])
+
     def test_parse_census_calendar(self) -> None:
         html = """
         <table id="calendar">
@@ -254,6 +286,21 @@ class DoctorSourceContractTests(unittest.TestCase):
             fetch_earnings.http_get = original
         self.assertEqual(rows, {})
 
+    def test_missing_finnhub_key_writes_explicit_failure_snapshot(self) -> None:
+        import fetch_earnings
+        written = {}
+        with unittest.mock.patch.object(
+                 fetch_earnings, "load_yaml",
+                 return_value={"core": [{"ticker": "TEST"}], "monitor": []}), \
+             unittest.mock.patch.object(fetch_earnings, "env_key", return_value=None), \
+             unittest.mock.patch.object(
+                 fetch_earnings, "write_json",
+                 side_effect=lambda _path, obj: written.update(obj)):
+            self.assertEqual(fetch_earnings.main(), 0)
+        self.assertEqual(written["core"], ["TEST"])
+        self.assertEqual(written["records"], [])
+        self.assertEqual(written["failures"][0]["severity"], "critical")
+
     def test_ism_retries_with_same_session_after_sso_cookie_page(self) -> None:
         html = b"""
         <table><tr><th>Month</th><th>Manufacturing PMI</th><th>Services PMI</th></tr>
@@ -281,6 +328,38 @@ class DoctorSourceContractTests(unittest.TestCase):
                 dt.date(2026, 9, 1), dt.date(2026, 9, 30))
         self.assertEqual(len(rows), 2)
 
+    def test_all_fred_failures_are_marked_critical(self) -> None:
+        written = {}
+        whitelist = [{"key": "cpi", "source": "fred"}]
+        with unittest.mock.patch.object(fetch_macro, "env_key", return_value="key"), \
+             unittest.mock.patch.object(
+                 fetch_macro, "settings",
+                 return_value={"fred": {"lookahead_days": 30,
+                                         "observation_limit": 2}}), \
+             unittest.mock.patch.object(
+                 fetch_macro, "load_yaml",
+                 side_effect=lambda name: (
+                     {"macro": whitelist} if name == "events.yaml"
+                     else {"cpi": {"release_id": 10}} if name == "release_ids.yaml"
+                     else {})), \
+             unittest.mock.patch.object(
+                 fetch_macro, "fred_release_dates", return_value=None), \
+             unittest.mock.patch.object(fetch_macro, "bls_schedule", return_value=[]), \
+             unittest.mock.patch.object(
+                 fetch_macro, "treasury_long_auctions", return_value=[]), \
+             unittest.mock.patch.object(fetch_macro, "bea_schedule", return_value=[]), \
+             unittest.mock.patch.object(fetch_macro, "census_schedule", return_value=[]), \
+             unittest.mock.patch.object(fetch_macro, "ism_schedule", return_value=[]), \
+             unittest.mock.patch.object(fetch_macro, "adp_schedule", return_value=[]), \
+             unittest.mock.patch.object(
+                 fetch_macro, "write_json",
+                 side_effect=lambda _path, obj: written.update(obj)):
+            self.assertEqual(fetch_macro.main(), 0)
+        self.assertTrue(any(
+            failure.get("source") == "fred"
+            and failure.get("severity") == "critical"
+            for failure in written["failures"]))
+
 
 class DotenvTests(unittest.TestCase):
     def test_dotenv_loads_without_overriding_process_secret(self) -> None:
@@ -295,6 +374,21 @@ class DotenvTests(unittest.TestCase):
                 common.load_dotenv(path)
                 self.assertEqual(os.environ["FRED_API_KEY"], "process-value")
                 self.assertEqual(os.environ["NEW_CAL_KEY"], "quoted")
+
+
+class HttpLoggingTests(unittest.TestCase):
+    def test_http_failure_redacts_credentials_from_stderr(self) -> None:
+        secret = "do-not-print-this-api-key"
+        error = RuntimeError(
+            f"request failed: https://example.test/data?api_key={secret}")
+        stderr = io.StringIO()
+        with unittest.mock.patch("requests.get", side_effect=error), \
+             unittest.mock.patch("sys.stderr", stderr):
+            result = common.http_get(
+                "https://example.test/data", {"api_key": secret}, retries=1)
+        self.assertIsNone(result)
+        self.assertNotIn(secret, stderr.getvalue())
+        self.assertIn("[REDACTED]", stderr.getvalue())
 
 
 if __name__ == "__main__":

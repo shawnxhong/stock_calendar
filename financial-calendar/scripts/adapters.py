@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from common import read_json, write_json
+from common import atomic_write_text, read_json, write_json
 
 
 class EnvironmentSecrets:
@@ -36,6 +36,6 @@ class DirectoryDelivery:
     def deliver(self, *, tier: str, short: str, long: str,
                 idempotency_key: str) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
-        stem = f"{idempotency_key}-{tier}"
-        (self.directory / f"{stem}.md").write_text(long, encoding="utf-8")
-        (self.directory / f"{stem}-short.md").write_text(short, encoding="utf-8")
+        stem = idempotency_key
+        atomic_write_text(self.directory / f"{stem}.md", long)
+        atomic_write_text(self.directory / f"{stem}-short.md", short)

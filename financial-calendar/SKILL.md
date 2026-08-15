@@ -1,5 +1,5 @@
 ---
-name: financial-calendar
+name: us-stock-financial-calendar
 description: Passive-push US financial calendar. Pulls official release schedules (FRED, BLS, BEA, Census, TreasuryDirect), watchlist earnings dates with explicit confirmed/estimated confidence, and a pure-date-math mechanical calendar (OPEX, triple witching, month/quarter end, index reconstitution, buyback blackout), diffs them against the last snapshot to surface date changes, and renders monthly / weekly / daily briefs in both a short IM version and a long email version. Use this skill whenever the user or an agent asks to run the financial calendar, 财经日历, econ calendar, macro calendar, the monthly/weekly/daily brief, what's happening this week/month, upcoming FOMC or CPI or NFP dates, watchlist earnings dates, or to edit the calendar configs (events.yaml, watchlist.yaml, calendar.yaml, settings.yaml). Covers US macro and US-listed watchlist earnings only. It does NOT estimate flow magnitude or direction (CTA positioning, vol-control deleveraging, dealer gamma) — that lives in EEI.
 ---
 
@@ -47,7 +47,7 @@ description: Passive-push US financial calendar. Pulls official release schedule
 
 ```bash
 uv venv .venv
-uv pip install --python .venv/bin/python -r requirements-dev.txt
+uv pip install --python .venv/bin/python -r requirements.lock
 
 export FRED_API_KEY=...        # https://fred.stlouisfed.org/docs/api/api_key.html
 export FINNHUB_API_KEY=...     # https://finnhub.io  免费层即可
@@ -62,9 +62,11 @@ python scripts/bootstrap_releases.py     # 发现 FRED release_id，只需跑一
 2. 处理 `config/events_review.yaml` 里的 ambiguous / not_found
 3. 审核 `config/calendar.yaml`：
    - FOMC 2026 会议已按 Fed 官网核验；未来会议纪要日期在官方公布前不推算
-   - Russell 2026-06-26 已核验；2026-11-20 仍是隔离的未核实占位符
+   - Russell 2026-06-26 与 2026-12-11 已按 LSEG 最新官方日程核验
    - 密歇根 2026 剩余日期来自官方 PDF；ISM / ADP 已改为官网机器日历
 4. 填写 `config/watchlist.yaml`（core / monitor，仅美国上市代码）
+   - 规范代码与供应商格式不同时，保留规范 `ticker`，另填 `finnhub_ticker` 或
+     `yfinance_ticker`（例如 `BRK.B` / `BRK-B`）
 
 ```bash
 python scripts/run.py --doctor    # 检查配置与连通性，跑通后再上线
@@ -80,6 +82,9 @@ python scripts/run.py --tier=week --no-fetch   # 用缓存数据重渲染
 ```
 
 输出：`logs/YYYY-MM-DD-<tier>.md`（长版，邮件）与 `-short.md`（短版，IM，≤15 行）。
+设置 `FINCAL_DATA_DIR`、`FINCAL_LOG_DIR`、`FINCAL_DELIVERY_DIR` 后可使用独立生产
+持久目录和 shadow 文件投递；幂等键由日期、tier 与渲染内容哈希组成，adapter 成功后
+才记录状态。
 
 ## 数据健康与失败处理
 

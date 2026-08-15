@@ -19,7 +19,7 @@ consensus:
 tiers:
   # 各档简报纳入的最低分级
   month: [A, B]
-  week: [A, B, C]     # C 类仅出现在长版
+  week: [A, B, C]     # 长版全量；短版仅 A 类与 core 财报
   day: [A, B, C]
 
 staleness:

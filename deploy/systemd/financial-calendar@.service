@@ -1,0 +1,26 @@
+[Unit]
+Description=Financial Calendar %i shadow run
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=%h/stock_calendar/.env
+
+[Service]
+Type=oneshot
+TimeoutStartSec=15min
+WorkingDirectory=%h/stock_calendar
+EnvironmentFile=%h/stock_calendar/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=FINCAL_DATA_DIR=%h/stock_calendar/runtime/data
+Environment=FINCAL_LOG_DIR=%h/stock_calendar/runtime/logs
+Environment=FINCAL_DELIVERY_DIR=%h/stock_calendar/runtime/shadow-delivery
+ExecStartPre=/usr/bin/install -d -m 0700 %h/stock_calendar/runtime/data %h/stock_calendar/runtime/logs %h/stock_calendar/runtime/shadow-delivery
+ExecStart=%h/stock_calendar/.venv/bin/python %h/stock_calendar/financial-calendar/scripts/run.py --tier=%i
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/stock_calendar/runtime
+
+[Install]
+WantedBy=default.target

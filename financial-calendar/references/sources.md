@@ -43,7 +43,7 @@ BLS 的 ICS 带**精确发布时点**，是静态时点表的交叉校验源。
 
 - 摘要文本格式不稳定，匹配用关键词而非精确名称
 - 时区：DTSTART 可能带或不带 tzinfo，代码里统一按 ET 处理
-- 只覆盖 BLS（CPI、NFP、PPI、JOLTS、初请），不覆盖 BEA/Census/Fed
+- 只覆盖 BLS（CPI、NFP、PPI、JOLTS 等），不覆盖初请、BEA/Census/Fed
 
 ### 判断它坏了
 
@@ -57,11 +57,14 @@ BLS 的 ICS 带**精确发布时点**，是静态时点表的交叉校验源。
 ## TreasuryDirect — 国债拍卖
 
 - `https://www.treasurydirect.gov/TA_WS/securities/announced?format=json&type=Note|Bond`
+- `https://home.treasury.gov/system/files/221/Tentative-Auction-Schedule.xml`
 - 无需 API key
 
 ### 坑
 
-- 只取 10y / 20y / 30y。短端票据是噪音，长端拍卖的 tail 才是 A 类事件
+- 只取名义 10y / 30y；20y 与 TIPS 不在已批准的 A 类白名单
+- `announced` 只覆盖已公告近端事件；半年 XML 是月度前瞻骨干，正式公告优先覆盖
+- XML 日期在正式公告前标为 `estimated`，并保留 tentative 注记
 - 增发（reopening）会重复公告同一场拍卖，需按 (date, term) 去重
 - 拍卖时点通常 13:00 ET，但偶有例外；本系统按静态表处理
 

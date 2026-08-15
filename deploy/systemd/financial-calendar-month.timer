@@ -1,0 +1,11 @@
+[Unit]
+Description=First-calendar-day financial calendar shadow run
+
+[Timer]
+OnCalendar=*-*-01 07:15:00 America/New_York
+Persistent=true
+AccuracySec=1min
+Unit=financial-calendar@month.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekday pre-market financial calendar shadow run
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 07:00:00 America/New_York
+Persistent=true
+AccuracySec=1min
+Unit=financial-calendar@day.service
+
+[Install]
+WantedBy=timers.target

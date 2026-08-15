@@ -8,7 +8,7 @@
 
 ## 主要能力
 
-- 聚合 FRED、BLS、TreasuryDirect、BEA、Census、ISM、ADP 等日程源。
+- 聚合 FRED、BLS、美国财政部半年拍卖日程、TreasuryDirect、BEA、Census、ISM、ADP 等日程源。
 - 拉取 Finnhub 财报日历，并用 yfinance 交叉验证。
 - 生成 OPEX、三重魔咒、交易月末/季末和指数再平衡等机械事件。
 - 保存快照并检测 `NEW`、`MOVED`、`STALE`、`CANCELLED`、`CONFIRMED`。
@@ -70,6 +70,17 @@ release ID，也不要把没有 `source` 和 `source_checked_at` 的日期标为
 `-short.md`。缺少 FRED key 时，系统仍会抓取无需 key 的官方源，但简报会明确标记
 FRED 数据不完整。
 
+本机生产 shadow 使用独立的 `runtime/` 持久目录，并启用文件投递内容幂等：
+
+```bash
+FINCAL_DATA_DIR="$PWD/runtime/data" \
+FINCAL_LOG_DIR="$PWD/runtime/logs" \
+FINCAL_DELIVERY_DIR="$PWD/runtime/shadow-delivery" \
+.venv/bin/python financial-calendar/scripts/run.py --tier=week
+```
+
+同一天、同一 tier、同一渲染内容只投递一次；只有 adapter 成功后才写入投递状态。
+
 ## 验证
 
 ```bash
@@ -78,14 +89,15 @@ FRED 数据不完整。
 python3 /home/hong/.codex/skills/.system/skill-creator/scripts/quick_validate.py financial-calendar
 ```
 
-当前本地回归包含 46 个测试，覆盖日期数学、DST、源失败、快照恢复、diff、防抖、
+当前本地回归包含 65 个测试，覆盖日期数学、DST、源失败、快照恢复、diff、防抖、
 短版上限和重复运行幂等。
 
 ## 上线边界
 
-本机 Hermes 仅用于开发和 shadow run，不是真实生产环境。正式投递前必须完成 14 天
-并行验收，并在生产环境重新运行 doctor、bootstrap 审计和 dry run。持久卷、secret
-manager、调度、投递适配和回退要求见
+本环境现作为目标生产主机，但当前只允许 shadow 文件投递。`deploy/systemd/` 提供按
+纽约时区运行的 day/week/month user timers；安装脚本会先执行 doctor，因此空
+watchlist 或配置缺口会阻止启用。正式外部投递前仍必须完成 14 天并行验收。
+持久状态、调度、投递和回退要求见
 [生产迁移清单](docs/production-migration.md)。
 
 详细系统决策见 [设计文档](docs/financial-calendar-design-v1.0.md)，贡献约定见

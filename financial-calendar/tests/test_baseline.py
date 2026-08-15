@@ -5,6 +5,7 @@ import importlib
 import json
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -141,6 +142,74 @@ class EarningsTests(unittest.TestCase):
         )
         self.assertEqual(result[0]["date_confidence"], "estimated")
         self.assertEqual(result[0]["vendor_corroboration"], "agreed")
+
+    def test_watchlist_preserves_canonical_symbol_with_provider_alias(self) -> None:
+        core, monitor, aliases = fetch_earnings.parse_watchlist({
+            "core": [{"ticker": "BRK.B", "yfinance_ticker": "BRK-B"}],
+            "monitor": [{"ticker": "GOOGL"}],
+        })
+        self.assertEqual(core, ["BRK.B"])
+        self.assertEqual(monitor, ["GOOGL"])
+        self.assertEqual(aliases["BRK.B"], {
+            "finnhub": "BRK.B", "yfinance": "BRK-B",
+        })
+
+    def test_watchlist_rejects_duplicate_symbols_across_tiers(self) -> None:
+        with self.assertRaises(ValueError):
+            fetch_earnings.parse_watchlist({
+                "core": [{"ticker": "NVDA"}],
+                "monitor": [{"ticker": "nvda"}],
+            })
+
+    def test_watchlist_rejects_empty_and_colliding_provider_aliases(self) -> None:
+        with self.assertRaises(ValueError):
+            fetch_earnings.parse_watchlist({
+                "core": [{"ticker": "NVDA", "yfinance_ticker": " "}],
+            })
+        with self.assertRaises(ValueError):
+            fetch_earnings.parse_watchlist({
+                "core": [
+                    {"ticker": "BRK.B", "yfinance_ticker": "BRK-B"},
+                    {"ticker": "BRK-B", "yfinance_ticker": "BRK-B"},
+                ],
+            })
+
+    def test_reconcile_does_not_compare_different_earnings_cycles(self) -> None:
+        result = fetch_earnings.reconcile(
+            "NVDA", [{"date": "2027-05-18", "hour": "amc"}],
+            ["2026-08-27"], "conservative",
+        )
+        self.assertEqual({row["date"] for row in result},
+                         {"2027-05-18", "2026-08-27"})
+        self.assertTrue(all(row["disagreement"] is None for row in result))
+
+    def test_reconcile_nearby_disagreement_uses_both_provenances(self) -> None:
+        result = fetch_earnings.reconcile(
+            "TEST", [{"date": "2026-08-20", "hour": "amc"}],
+            ["2026-08-25"], "conservative",
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["date"], "2026-08-25")
+        self.assertEqual(result[0]["sources"], ["finnhub", "yfinance"])
+        self.assertEqual(result[0]["vendor_corroboration"], "disagreed")
+
+    def test_yfinance_exception_is_structured_failure(self) -> None:
+        fake = types.SimpleNamespace(
+            Ticker=mock.Mock(side_effect=RuntimeError("provider down")))
+        with mock.patch.dict(sys.modules, {"yfinance": fake}):
+            rows, failures = fetch_earnings.yfinance_earnings(["BRK-B"])
+        self.assertEqual(rows, {})
+        self.assertEqual(failures[0]["source"], "yfinance")
+        self.assertEqual(failures[0]["key"], "BRK-B")
+
+    def test_yfinance_empty_calendar_is_structured_failure(self) -> None:
+        fake = types.SimpleNamespace(
+            Ticker=mock.Mock(return_value=types.SimpleNamespace(calendar=None)))
+        with mock.patch.dict(sys.modules, {"yfinance": fake}):
+            rows, failures = fetch_earnings.yfinance_earnings(["NVDA"])
+        self.assertEqual(rows, {})
+        self.assertEqual(failures[0]["key"], "NVDA")
+        self.assertIn("not a mapping", failures[0]["reason"])
 
 
 class RenderingTests(unittest.TestCase):

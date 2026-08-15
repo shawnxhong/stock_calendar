@@ -11,6 +11,7 @@ import datetime as dt
 import json
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -69,11 +70,9 @@ def load_yaml(name: str) -> dict:
 
 
 def save_yaml(path: Path, obj: Any, header: str = "") -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        if header:
-            f.write(header.rstrip() + "\n\n")
-        yaml.safe_dump(obj, f, allow_unicode=True, sort_keys=False)
+    text = (header.rstrip() + "\n\n" if header else "")
+    text += yaml.safe_dump(obj, allow_unicode=True, sort_keys=False)
+    atomic_write_text(path, text)
 
 
 def read_json(path: Path, default: Any = None) -> Any:
@@ -84,9 +83,26 @@ def read_json(path: Path, default: Any = None) -> Any:
 
 
 def write_json(path: Path, obj: Any) -> None:
+    atomic_write_text(
+        path, json.dumps(obj, ensure_ascii=False, indent=2) + "\n")
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Atomically replace a UTF-8 text file in its destination directory."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
+    tmp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=path.parent,
+                prefix=f".{path.name}.", delete=False) as tmp:
+            tmp_name = tmp.name
+            tmp.write(text)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if tmp_name and os.path.exists(tmp_name):
+            os.unlink(tmp_name)
 
 
 def settings() -> dict:
@@ -169,6 +185,21 @@ def http_get(url: str, params: dict | None = None, *, timeout: int = 30,
 
     hdrs = {"User-Agent": "financial-calendar-skill/1.0"}
     hdrs.update(headers or {})
+    def safe_error(exc: Exception) -> str:
+        """Keep transport diagnostics without leaking credentials in URLs."""
+        message = str(exc)
+        for key, value in (params or {}).items():
+            lowered = str(key).lower()
+            if value and any(marker in lowered for marker in (
+                    "key", "token", "secret", "password", "authorization")):
+                message = message.replace(str(value), "[REDACTED]")
+        for key, value in (headers or {}).items():
+            lowered = str(key).lower()
+            if value and any(marker in lowered for marker in (
+                    "key", "token", "secret", "password", "authorization")):
+                message = message.replace(str(value), "[REDACTED]")
+        return f"{type(exc).__name__}: {message}"
+
     last = None
     for attempt in range(retries):
         try:
@@ -176,7 +207,7 @@ def http_get(url: str, params: dict | None = None, *, timeout: int = 30,
             r.raise_for_status()
             return r.json() if as_json else r.content
         except Exception as exc:  # noqa: BLE001
-            last = exc
+            last = safe_error(exc)
             if attempt < retries - 1:
                 time.sleep(2 * (attempt + 1))
     sys.stderr.write(f"[warn] GET failed after {retries} tries: {url} ({last})\n")

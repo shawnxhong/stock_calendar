@@ -238,9 +238,10 @@ def render_week(doc, changes, cfg, short: bool) -> str:
         for e in keep:
             by_day.setdefault(et_date(e["date_utc"]), []).append(e)
 
-    L += ["## 📅 本周日程", ""]
+    L += ["## 📅 本周重点日程" if short else "## 📅 本周日程", ""]
     if not by_day:
-        L += ["- （无）", ""]
+        empty = "- （无 A 类或 core 财报；B/C 见长版）" if short else "- （无）"
+        L += [empty, ""]
     for day in sorted(by_day):
         L.append(f"### {day:%m/%d}（{WEEKDAY_CN[day.weekday()]}）")
         L += [_line(e, short) for e in by_day[day]]

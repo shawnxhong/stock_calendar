@@ -4,13 +4,16 @@
   python scripts/run.py --tier=week --no-fetch     # re-render from cached data
   python scripts/run.py --doctor                   # connectivity + config check
 
-Idempotency: state.json records (event id, tier) already pushed. An event is
-not re-pushed in the same tier unless its diff status changed — a MOVED event
-counts as new content and MUST be re-pushed.
+Delivery idempotency is content-based: date + tier + rendered-content hash.
+State is recorded only after the adapter succeeds.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
+import hashlib
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,8 +22,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import render as render_mod  # noqa: E402
-from common import (CONFIG, DATA, LOGS, load_yaml, now_utc_iso, read_json,  # noqa: E402
-                    today_et, write_json)
+from adapters import DirectoryDelivery  # noqa: E402
+from common import (CONFIG, DATA, LOGS, atomic_write_text, load_yaml,  # noqa: E402
+                    now_utc_iso, read_json, today_et, write_json)
 
 
 def _run(script: str) -> int:
@@ -28,21 +32,75 @@ def _run(script: str) -> int:
     return subprocess.call([sys.executable, str(HERE / script)])
 
 
-def update_delivery_state(state: dict, doc: dict, changes: list[dict],
-                          tier: str, pushed_at: str) -> int:
-    """Bookkeep newly deliverable events without coupling to any transport."""
-    pushed = state.setdefault("pushed", {})
-    changed = {c["id"] for c in changes
-               if c["type"] in ("MOVED", "CANCELLED", "CONFIRMED")}
-    tier_map = pushed.setdefault(tier, {})
-    fresh = 0
-    for ev in doc["events"]:
-        prev = tier_map.get(ev["id"])
-        if prev is None or ev["id"] in changed:
-            tier_map[ev["id"]] = pushed_at
-            fresh += 1
-    state["last_run"] = {"tier": tier, "at": pushed_at}
-    return fresh
+@contextlib.contextmanager
+def run_lock():
+    """Serialize overlapping scheduler/manual runs to protect shared state."""
+    path = DATA / ".run.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def content_version(short: str, long: str) -> str:
+    payload = short.encode("utf-8") + b"\0" + long.encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:16]
+
+
+def deliver_once(state: dict, adapter, *, tier: str, short: str, long: str,
+                 day: str, delivered_at: str) -> tuple[bool, str]:
+    """Deliver a content version once and mark state only after success."""
+    version = content_version(short, long)
+    provider_key = f"{day}-{tier}-{version}"
+    state_key = provider_key
+    delivered = state.setdefault("delivered_content", {})
+    legacy_key = f"{tier}:{day}-{version}"
+    if state_key in delivered or legacy_key in delivered:
+        if state_key not in delivered:
+            delivered[state_key] = {
+                **delivered[legacy_key], "migrated_from": legacy_key,
+            }
+            state["last_delivery"] = {
+                "key": state_key, "at": delivered[state_key].get("at"),
+            }
+        return False, provider_key
+    adapter.deliver(tier=tier, short=short, long=long,
+                    idempotency_key=provider_key)
+    delivered[state_key] = {
+        "tier": tier, "day": day, "version": version, "at": delivered_at,
+    }
+    state["last_delivery"] = {"key": state_key, "at": delivered_at}
+    return True, provider_key
+
+
+def _write_health(*, healthy: bool, tier: str, failures: list[dict],
+                  delivery: dict, outputs: list[str]) -> None:
+    status = "healthy" if healthy and not failures else (
+        "degraded" if healthy else "unhealthy")
+    write_json(DATA / "health.json", {
+        "checked_at": now_utc_iso(), "healthy": healthy, "status": status,
+        "tier": tier,
+        "failure_count": len(failures), "failures": failures,
+        "delivery": delivery, "outputs": outputs,
+    })
+
+
+def _pipeline_failure(tier: str, source: str, reason: str, code: int = 3) -> int:
+    failure = {"source": source, "severity": "critical", "reason": reason}
+    _write_health(
+        healthy=False, tier=tier, failures=[failure],
+        delivery={"configured": False, "delivered": False}, outputs=[])
+    print(f"[fatal] {reason}")
+    return code
+
+
+def fred_config_gaps(ids: dict, macro_entries: list[dict]) -> set[str]:
+    expected = {row["key"] for row in macro_entries
+                if row.get("source") == "fred"}
+    return expected - set(ids)
 
 
 def doctor() -> int:
@@ -56,13 +114,19 @@ def doctor() -> int:
         ok &= present or not required
 
     ids = load_yaml("release_ids.yaml")
-    print(f"  {'✅' if ids else '❌'} release_ids.yaml：{len(ids)} 条已解析"
+    macro_entries = load_yaml("events.yaml").get("macro") or []
+    fred_gaps = fred_config_gaps(ids, macro_entries)
+    ids_ok = bool(ids) and not fred_gaps
+    print(f"  {'✅' if ids_ok else '❌'} release_ids.yaml：{len(ids)} 条已解析"
           + ("" if ids else "  → 先运行 bootstrap_releases.py"))
-    ok &= bool(ids)
+    if fred_gaps:
+        print("  ❌ 缺少 FRED release_id：" + "、".join(sorted(fred_gaps)))
+    ok &= ids_ok
 
     review = (load_yaml("events_review.yaml") or {}).get("needs_review") or []
     if review:
         print(f"  ⚠ events_review.yaml 有 {len(review)} 条待人工处理")
+        ok = False
 
     cal = load_yaml("calendar.yaml")
     fomc = cal.get("fomc_meetings") or []
@@ -89,10 +153,17 @@ def doctor() -> int:
               ", ".join(f"{r['date']}({r.get('index')})" for r in unverified))
 
     wl = load_yaml("watchlist.yaml")
-    ncore = len(wl.get("core") or [])
-    nmon = len(wl.get("monitor") or [])
-    print(f"  {'✅' if ncore + nmon else '⚠'} watchlist：core {ncore} / monitor {nmon}")
-    ok &= bool(ncore + nmon)
+    from fetch_earnings import parse_watchlist
+    try:
+        core, monitor, aliases = parse_watchlist(wl)
+    except (KeyError, TypeError, ValueError) as exc:
+        core, monitor, aliases = [], [], {}
+        print(f"  ❌ watchlist 配置无效：{exc}")
+        ok = False
+    else:
+        print(f"  {'✅' if core or monitor else '⚠'} watchlist："
+              f"core {len(core)} / monitor {len(monitor)}")
+        ok &= bool(core or monitor)
 
     print("── 真实源解析 ──")
     import datetime as dt
@@ -133,19 +204,32 @@ def doctor() -> int:
     finnhub_key = os.environ.get("FINNHUB_API_KEY")
     if finnhub_key:
         from fetch_earnings import finnhub_earnings
-        rows = finnhub_earnings(finnhub_key, start, start + dt.timedelta(days=30), set())
-        good = rows is not None
+        fh_symbols = {aliases[symbol]["finnhub"] for symbol in core + monitor}
+        fh_rows = finnhub_earnings(finnhub_key, start, end, fh_symbols)
+        good = fh_rows is not None
         print(f"  {'✅' if good else '❌'} Finnhub 认证与 schema")
         ok &= good
     else:
+        fh_rows = {}
         print("  ⏭ Finnhub：缺少 FINNHUB_API_KEY，未联网测试")
 
-    # Connectivity/schema probe only. AAPL is not added to the user's watchlist.
     from fetch_earnings import yfinance_earnings
-    yf_rows = yfinance_earnings(["AAPL"])
-    yf_good = bool(yf_rows.get("AAPL"))
-    print(f"  {'✅' if yf_good else '❌'} yfinance schema（AAPL 诊断，不写入 watchlist）")
-    ok &= yf_good
+    yf_symbols = [aliases[symbol]["yfinance"] for symbol in core + monitor]
+    yf_rows, yf_failures = yfinance_earnings(yf_symbols)
+    covered = {
+        symbol for symbol in core + monitor
+        if ((fh_rows or {}).get(aliases[symbol]["finnhub"])
+            or yf_rows.get(aliases[symbol]["yfinance"]))
+    }
+    missing = sorted(set(core + monitor) - covered)
+    yf_good = not yf_failures
+    print(f"  {'✅' if yf_good else '❌'} yfinance watchlist schema："
+          f"{len(yf_rows)} 个 ticker")
+    print(f"  {'✅' if not missing else '❌'} 财报源联合覆盖："
+          f"{len(covered)}/{len(core) + len(monitor)}")
+    if missing:
+        print("  ❌ 无财报日期：" + "、".join(missing))
+    ok &= yf_good and not missing
     return 0 if ok else 1
 
 
@@ -154,6 +238,9 @@ def main() -> int:
     ap.add_argument("--tier", choices=["day", "week", "month"])
     ap.add_argument("--no-fetch", action="store_true")
     ap.add_argument("--doctor", action="store_true")
+    ap.add_argument(
+        "--delivery-dir",
+        help="shadow/file delivery directory; omit to render without delivery")
     args = ap.parse_args()
 
     if args.doctor:
@@ -161,41 +248,90 @@ def main() -> int:
     if not args.tier:
         ap.error("--tier is required (or use --doctor)")
 
-    if not args.no_fetch:
-        for script in ("fetch_macro.py", "fetch_earnings.py"):
-            if _run(script) != 0:
+    try:
+        with run_lock():
+            return _run_tier(args.tier, args.no_fetch, args.delivery_dir)
+    except Exception as exc:  # noqa: BLE001
+        return _pipeline_failure(
+            args.tier, "pipeline",
+            f"未处理异常 {type(exc).__name__}: {exc}")
+
+
+def _run_tier(tier: str, no_fetch: bool, delivery_dir: str | None) -> int:
+    started_at = now_utc_iso()
+
+    if not no_fetch:
+        fetch_failures = []
+        for script, source in (("fetch_macro.py", "macro_fetch"),
+                               ("fetch_earnings.py", "earnings_fetch")):
+            code = _run(script)
+            if code != 0:
                 print(f"[warn] {script} 失败 —— 继续，将使用上次快照渲染")
+                fetch_failures.append({
+                    "source": source, "severity": "critical",
+                    "reason": f"{script} 异常退出（code={code}），沿用旧数据",
+                })
+        write_json(DATA / "fetch_status.json", {
+            "started_at": started_at, "failures": fetch_failures,
+        })
         if _run("normalize.py") != 0:
-            print("[fatal] normalize 失败")
-            return 3
-        _run("diff_engine.py")
+            return _pipeline_failure(tier, "normalize", "normalize 失败")
+        if _run("diff_engine.py") != 0:
+            return _pipeline_failure(
+                tier, "diff_engine", "diff_engine 失败；拒绝沿用旧 changes.json")
 
     doc = read_json(DATA / "events.json")
     if not doc:
-        print("[fatal] events.json 缺失")
-        return 3
+        return _pipeline_failure(tier, "events", "events.json 缺失")
 
-    long_txt = render_mod.render(args.tier, short=False)
-    short_txt = render_mod.render(args.tier, short=True)
+    long_txt = render_mod.render(tier, short=False)
+    short_txt = render_mod.render(tier, short=True)
 
-    out = LOGS / f"{today_et().isoformat()}-{args.tier}.md"
-    out.write_text(long_txt, encoding="utf-8")
-    out_s = LOGS / f"{today_et().isoformat()}-{args.tier}-short.md"
-    out_s.write_text(short_txt, encoding="utf-8")
+    out = LOGS / f"{today_et().isoformat()}-{tier}.md"
+    atomic_write_text(out, long_txt)
+    out_s = LOGS / f"{today_et().isoformat()}-{tier}-short.md"
+    atomic_write_text(out_s, short_txt)
 
-    # Idempotency bookkeeping.
     state = read_json(DATA / "state.json", {}) or {}
-    pushed_at = now_utc_iso()
-    fresh = update_delivery_state(
-        state, doc, (read_json(DATA / "changes.json") or {}).get("changes", []),
-        args.tier, pushed_at)
+    finished_at = now_utc_iso()
+    state["last_run"] = {"tier": tier, "at": finished_at}
+    configured_delivery = delivery_dir or os.environ.get("FINCAL_DELIVERY_DIR")
+    delivery = {"configured": bool(configured_delivery), "delivered": False}
+    if configured_delivery:
+        adapter = DirectoryDelivery(Path(configured_delivery).expanduser().resolve())
+        try:
+            did_deliver, provider_key = deliver_once(
+                state, adapter, tier=tier, short=short_txt, long=long_txt,
+                day=today_et().isoformat(), delivered_at=finished_at)
+        except Exception as exc:  # noqa: BLE001
+            delivery.update({"error": f"{type(exc).__name__}: {exc}"})
+            _write_health(
+                healthy=False, tier=tier,
+                failures=(doc.get("failures") or []) + [{
+                    "source": "delivery", "severity": "critical",
+                    "reason": delivery["error"],
+                }],
+                delivery=delivery, outputs=[str(out), str(out_s)])
+            print(f"[fatal] delivery failed: {delivery['error']}")
+            return 5
+        delivery.update({"delivered": did_deliver,
+                         "idempotency_key": provider_key})
     write_json(DATA / "state.json", state)
 
     print(f"[ok] {out}")
     print(f"[ok] {out_s}")
-    print(f"[ok] 本次新增/更新事件 {fresh} 条")
+    if configured_delivery:
+        action = "已写入 shadow 投递目录" if delivery["delivered"] else "内容未变化，跳过重复投递"
+        print(f"[ok] {action}（{delivery['idempotency_key']}）")
+    else:
+        print("[info] 未配置 delivery adapter；仅生成报告，不记录为已投递")
+    failures = doc.get("failures") or []
+    critical = [f for f in failures if f.get("severity") == "critical"]
+    _write_health(
+        healthy=not critical, tier=tier, failures=failures,
+        delivery=delivery, outputs=[str(out), str(out_s)])
     print("\n" + short_txt)
-    return 0
+    return 2 if critical else 0
 
 
 if __name__ == "__main__":

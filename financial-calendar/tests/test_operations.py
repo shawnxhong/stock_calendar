@@ -81,6 +81,20 @@ class DiffOperationalTests(unittest.TestCase):
 
 
 class SourceFallbackTests(unittest.TestCase):
+    def test_yfinance_ticker_failure_carries_only_that_tickers_events(self) -> None:
+        day = common.today_et() + dt.timedelta(days=7)
+        iso, confidence = common.et_to_utc(day, "16:30")
+        previous = {"events": [
+            {"id": "earnings:NVDA:x", "kind": "earnings",
+             "date_utc": iso, "time_confidence": confidence, "notes": []},
+            {"id": "earnings:TSLA:x", "kind": "earnings", "ticker": "TSLA",
+             "date_utc": iso, "time_confidence": confidence, "notes": []},
+        ]}
+        got = normalize.carry_forward_failed_sources(
+            [], previous, [{"source": "yfinance", "key": "NVDA"}])
+        self.assertEqual([event["id"] for event in got], ["earnings:NVDA:x"])
+        self.assertTrue(got[0]["carried_forward"])
+
     def test_failed_ism_carries_both_official_series(self) -> None:
         day = common.today_et() + dt.timedelta(days=7)
         olds = [
@@ -163,27 +177,111 @@ class RenderingFailureTests(unittest.TestCase):
         lines = output.rstrip().splitlines()
         self.assertFalse(lines[-2].startswith("### "))
 
+    def test_week_short_distinguishes_no_priority_events_from_no_events(self) -> None:
+        day = common.today_et() + dt.timedelta(days=1)
+        event = macro("manual:b", day)
+        event["tier"] = "B"
+        self.doc["events"] = [event]
+        output = render.render_week(self.doc, [], self.cfg, short=True)
+        self.assertIn("本周重点日程", output)
+        self.assertIn("无 A 类或 core 财报；B/C 见长版", output)
+
 
 class IdempotencyTests(unittest.TestCase):
-    def test_second_identical_run_has_no_fresh_events(self) -> None:
-        day = common.today_et() + dt.timedelta(days=1)
-        doc = {"events": [macro("manual:test", day)]}
-        state = {}
-        first = run.update_delivery_state(
-            state, doc, [], "week", "2026-08-12T00:00:00+00:00")
-        second = run.update_delivery_state(
-            state, doc, [], "week", "2026-08-12T01:00:00+00:00")
-        self.assertEqual((first, second), (1, 0))
+    class Adapter:
+        def __init__(self) -> None:
+            self.calls = []
 
-    def test_confirmed_change_requeues_existing_event(self) -> None:
-        day = common.today_et() + dt.timedelta(days=1)
-        doc = {"events": [macro("earnings:TEST:x", day)]}
-        state = {"pushed": {"week": {
-            "earnings:TEST:x": "2026-08-12T00:00:00+00:00"}}}
-        fresh = run.update_delivery_state(
-            state, doc, [{"id": "earnings:TEST:x", "type": "CONFIRMED"}],
-            "week", "2026-08-12T01:00:00+00:00")
-        self.assertEqual(fresh, 1)
+        def deliver(self, **kwargs) -> None:
+            self.calls.append(kwargs)
+
+    def test_second_identical_delivery_is_skipped(self) -> None:
+        state = {}
+        adapter = self.Adapter()
+        first, key1 = run.deliver_once(
+            state, adapter, tier="week", short="short\n", long="long\n",
+            day="2026-08-12", delivered_at="2026-08-12T00:00:00+00:00")
+        second, key2 = run.deliver_once(
+            state, adapter, tier="week", short="short\n", long="long\n",
+            day="2026-08-12", delivered_at="2026-08-12T01:00:00+00:00")
+        self.assertEqual((first, second), (True, False))
+        self.assertEqual(key1, key2)
+        self.assertIn("-week-", key1)
+        self.assertEqual(len(adapter.calls), 1)
+
+    def test_changed_content_gets_a_new_delivery_key(self) -> None:
+        state = {}
+        adapter = self.Adapter()
+        first, key1 = run.deliver_once(
+            state, adapter, tier="week", short="short\n", long="long\n",
+            day="2026-08-12", delivered_at="2026-08-12T00:00:00+00:00")
+        second, key2 = run.deliver_once(
+            state, adapter, tier="week", short="changed\n", long="long\n",
+            day="2026-08-12", delivered_at="2026-08-12T01:00:00+00:00")
+        self.assertTrue(first and second)
+        self.assertNotEqual(key1, key2)
+        self.assertEqual(len(adapter.calls), 2)
+
+    def test_legacy_delivery_key_is_migrated_without_redelivery(self) -> None:
+        version = run.content_version("short\n", "long\n")
+        legacy = f"week:2026-08-12-{version}"
+        state = {"delivered_content": {legacy: {
+            "tier": "week", "day": "2026-08-12", "version": version,
+            "at": "2026-08-12T00:00:00+00:00",
+        }}}
+        adapter = self.Adapter()
+        delivered, key = run.deliver_once(
+            state, adapter, tier="week", short="short\n", long="long\n",
+            day="2026-08-12", delivered_at="2026-08-12T01:00:00+00:00")
+        self.assertFalse(delivered)
+        self.assertEqual(adapter.calls, [])
+        self.assertIn(key, state["delivered_content"])
+        self.assertEqual(state["delivered_content"][key]["migrated_from"], legacy)
+
+    def test_failed_delivery_is_not_marked_complete(self) -> None:
+        class FailingAdapter:
+            def deliver(self, **_kwargs) -> None:
+                raise OSError("provider unavailable")
+
+        state = {}
+        with self.assertRaises(OSError):
+            run.deliver_once(
+                state, FailingAdapter(), tier="week", short="short\n",
+                long="long\n", day="2026-08-12",
+                delivered_at="2026-08-12T00:00:00+00:00")
+        self.assertEqual(state.get("delivered_content"), {})
+
+
+class OrchestratorFailureTests(unittest.TestCase):
+    def test_diff_failure_stops_before_rendering(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td, \
+             mock.patch.object(run, "DATA", Path(td)), \
+             mock.patch.object(run, "_run", side_effect=[0, 0, 0, 7]):
+            self.assertEqual(run._run_tier("week", False, None), 3)
+            health = common.read_json(Path(td) / "health.json")
+            self.assertFalse(health["healthy"])
+            self.assertEqual(health["failures"][0]["source"], "diff_engine")
+
+    def test_doctor_detects_missing_fred_release_ids(self) -> None:
+        entries = [
+            {"key": "cpi", "source": "fred"},
+            {"key": "beige_book", "source": "manual"},
+        ]
+        self.assertEqual(run.fred_config_gaps({}, entries), {"cpi"})
+        self.assertEqual(
+            run.fred_config_gaps({"cpi": {"release_id": 10}}, entries), set())
+
+    def test_noncritical_failure_health_is_degraded(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td, \
+             mock.patch.object(run, "DATA", Path(td)):
+            run._write_health(
+                healthy=True, tier="week", failures=[{"source": "bls_ics"}],
+                delivery={"configured": False}, outputs=[])
+            health = common.read_json(Path(td) / "health.json")
+        self.assertTrue(health["healthy"])
+        self.assertEqual(health["status"], "degraded")
 
 
 class ManualWindowTests(unittest.TestCase):
@@ -211,11 +309,11 @@ class PortabilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             adapter = adapters.DirectoryDelivery(Path(td))
             adapter.deliver(tier="week", short="short\n", long="long\n",
-                            idempotency_key="2026-08-12")
+                            idempotency_key="2026-08-12-week-abcd")
             self.assertEqual(
-                (Path(td) / "2026-08-12-week.md").read_text(), "long\n")
+                (Path(td) / "2026-08-12-week-abcd.md").read_text(), "long\n")
             self.assertEqual(
-                (Path(td) / "2026-08-12-week-short.md").read_text(), "short\n")
+                (Path(td) / "2026-08-12-week-abcd-short.md").read_text(), "short\n")
 
     def test_json_state_store_round_trip(self) -> None:
         import tempfile

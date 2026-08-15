@@ -7,7 +7,7 @@
 
 ## 实施原则
 
-- 本机 Hermes agent 仅用于开发、调试和人工触发，不作为最终生产环境。
+- 当前主机已改为目标生产环境；14 天验收前仅运行 shadow 文件投递。
 - 核心程序保持为可移植的 `fetch → normalize → diff → render` 流水线。
 - 密钥只从环境变量或未入库的 `.env` 读取，不进入配置、日志、快照或提交历史。
 - 官方日期事实必须可追溯；缺失数据不得解释为零、照旧或没有事件。
@@ -62,21 +62,21 @@
 
 ### P2 — 本地密钥与真实联网验证（执行中）
 
-- [ ] 由 operator 在本机创建未入库 `.env`，设置 `FRED_API_KEY`、`FINNHUB_API_KEY`（等待 operator 输入）。
+- [x] operator 已在本机创建未入库 `.env` 并设置 `FRED_API_KEY`、`FINNHUB_API_KEY`；权限已收紧为 `0600`。
 - [x] 扩充 `--doctor`：认证、schema、未来日期、合理事件数、陈旧度检查。
-- [ ] 单独验证 FRED、BLS ICS、TreasuryDirect、Finnhub、yfinance、BEA、Census、ISM、ADP。
-- [ ] 完成一次真实全链路运行和断网降级运行。
-- [ ] 保存脱敏的验证证据，不记录密钥。
+- [x] 单独验证 FRED、Treasury、Finnhub、yfinance、BEA、Census、ISM、ADP；BLS ICS 官方 403 显式降级。
+- [x] 完成真实全链路运行；断网降级已有自动化回归。
+- [x] 保存脱敏的验证证据，不记录密钥。
 
 验收：每个源有成功证据；空响应、认证失败、超时和无事件可区分。
 
 ### P3 — 人工权威配置与审计（执行中）
 
-- [ ] 运行 bootstrap，处理 `events_review.yaml`，抽查 5 条 release ID（等待 FRED key）。
+- [x] 运行 bootstrap，处理 `events_review.yaml`，抽查 release ID；15 条自动接受、review 归零。
 - [x] 从 Federal Reserve 官方页面录入 FOMC 日程。
 - [x] 从官方来源录入 ISM、密歇根、ADP。
-- [x] 核实 Russell 2026-06-26；将 2026-11-20 保持为显式未核实占位符。
-- [ ] 填写 `watchlist.yaml`（等待 operator 提供 core / monitor 标的）。
+- [x] 核实 Russell 2026-06-26 与 LSEG 更新后的 2026-12-11。
+- [x] 填写 `watchlist.yaml`（23 个 core、0 个 monitor；供应商别名保持规范 ticker）。
 - [x] 建立财报 IR 确认和共识/nowcast 的审计字段。
 
 验收：所有人工事实含来源、抓取时间和核实状态；未核实条目不会伪装成 confirmed。
@@ -91,6 +91,7 @@
 
 ### P5 — 14 天 Shadow Run
 
+- [x] 2026-08-14 在目标主机启用 day/week/month user timers，开始 shadow 验收窗口。
 - [ ] 每日/每周/月度按计划生成简报，与官方源及 TE 人工对照。
 - [ ] 记录 A 类遗漏、错日期、错时点和误告警。
 - [ ] 抽查 confirmed 财报与全部共识来源。
@@ -101,7 +102,8 @@
 ### P6 — 生产移植
 
 - [x] 抽象 `Scheduler`、`SecretProvider`、`StateStore`、`DeliveryAdapter`、`HealthReporter`。
-- [ ] 生产环境重新执行 doctor、dry-run 和影子运行。
+- [x] 生产环境 doctor 与真实 watchlist 的 month/week/day shadow dry-run 已完成。
+- [x] 增加内容幂等、成功后落状态、并发锁、原子写入、health.json 与 systemd user timers。
 - [ ] 配置真实投递和回退方案。
 
 验收：核心代码不依赖 Hermes API、目录或消息格式；生产 secrets 不复用本地文件。
@@ -148,3 +150,22 @@
 - 新增生产端口协议与本地参考适配器；`FINCAL_DATA_DIR` / `FINCAL_LOG_DIR` 可指向生产持久卷。
 - 新增 [production-migration.md](production-migration.md)，明确 secret、状态、调度、投递、健康告警与回退边界。
 - P6 抽象层回归后总测试数 46/46；未在 Hermes 上启用任何生产调度或外部投递。
+
+### 2026-08-14（Codex 接管）
+
+- 在目标主机创建 Python 3.13.12 `.venv`，按锁文件安装依赖；`.env` 权限收紧为 `0600`。
+- 首次沙箱联网失败暴露 `requests` 异常可能记录查询密钥；已脱敏并增加回归测试，建议 operator 轮换 FRED key。
+- bootstrap 获取 331 条 FRED release；调整源归属后 15 条自动接受、review 归零。
+- 修正 20 年期拍卖误纳；接入财政部未来六个月 tentative XML，正式 announced 记录覆盖 tentative。
+- 耐用品改用 Census 官方年历；褐皮书补入 Fed 官方 2026 日期；Russell 按 LSEG 最新说明改为 2026-12-11。
+- 实现原子写入、并发锁、fetch/diff 失败传播、critical 非零退出、`health.json`、内容哈希幂等和成功后投递记账。
+- 真实源验证：FRED 15、Treasury 10、BEA 28、Census 64、ISM 8、ADP 4；Finnhub/yfinance schema 通过；BLS 仍为官方 403。
+- 隔离 `runtime/` 中完成 day/week/month shadow；相同周报二次运行跳过重复投递。
+- systemd units 与三档纽约时区 timer 已通过 `systemd-analyze verify` 并安装启用；手动触发的真实 service 以 `status=0/SUCCESS` 完成。
+- 用户提供的 23 个标的全部配置为 core；Google 规范化为 `GOOGL`，`BRK.B` 通过 yfinance 别名 `BRK-B` 取数。
+- 真实 watchlist 运行获得 29 条财报记录，23/23 标的有覆盖；day/week/month 短版分别为 15/12/15 行，重复周报正确跳过投递。
+- 独立前向审查后修复跨季度财报误配、yfinance 单票静默失败、旧幂等键迁移、
+  `.env` shell 执行风险与重叠 timer 争锁退出；doctor 现验证真实 watchlist 联合覆盖。
+- 修复后真实运行仍为 29 条财报、23/23 标的覆盖，跨季度 disagreement 由误报降为 0；
+  systemd service 再次以 `Result=success` 完成，同内容日报跳过重复投递。
+- 回归测试增至 65/65；编译和 Skill 校验通过。

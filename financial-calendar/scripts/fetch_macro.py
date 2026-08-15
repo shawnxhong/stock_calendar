@@ -17,6 +17,7 @@ import datetime as dt
 from html.parser import HTMLParser
 import sys
 from pathlib import Path
+from xml.etree import ElementTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -27,6 +28,9 @@ FRED_RELEASE_DATES = "https://api.stlouisfed.org/fred/release/dates"
 FRED_OBSERVATIONS = "https://api.stlouisfed.org/fred/series/observations"
 BLS_ICS = "https://www.bls.gov/schedule/news_release/bls.ics"
 TREASURY_ANNOUNCED = "https://www.treasurydirect.gov/TA_WS/securities/announced"
+TREASURY_TENTATIVE = (
+    "https://home.treasury.gov/system/files/221/Tentative-Auction-Schedule.xml"
+)
 BEA_RELEASE_DATES = "https://apps.bea.gov/API/signup/release_dates.json"
 CENSUS_CALENDAR = "https://www.census.gov/economic-indicators/calendar-listview.html"
 ISM_CALENDAR = (
@@ -99,12 +103,41 @@ def bls_schedule() -> list[dict] | None:
 
 # ── Treasury ─────────────────────────────────────────────────────────────────
 
+def parse_treasury_tentative(raw: bytes | str, start: dt.date,
+                             end: dt.date) -> list[dict]:
+    """Parse Treasury's official six-month tentative auction calendar."""
+    try:
+        root = ElementTree.fromstring(raw)
+    except (ElementTree.ParseError, TypeError, ValueError):
+        return []
+    out = []
+    for node in root.findall("AuctionCalendarDate"):
+        term = (node.findtext("SecurityTermWeekYear") or "").strip()
+        if term not in ("10-Year", "30-Year"):
+            continue
+        if (node.findtext("TIPS") or "N").strip().upper() == "Y":
+            continue
+        raw_date = (node.findtext("AuctionDate") or "").strip()
+        try:
+            day = dt.date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        if start <= day <= end:
+            out.append({
+                "date": raw_date, "term": term,
+                "security_type": (node.findtext("SecurityType") or "").title(),
+                "cusip": None, "tentative": True,
+                "source": "U.S. Treasury tentative auction schedule",
+            })
+    return out
+
+
 def treasury_long_auctions(start: dt.date, end: dt.date) -> list[dict] | None:
-    """10y/30y auctions. Short bills are deliberately excluded — they are noise
-    for this purpose; long-end tails are the A-tier event."""
+    """10y/30y auctions: tentative horizon plus announced-date confirmation."""
     data = http_get(TREASURY_ANNOUNCED, {"format": "json", "type": "Note"})
     bonds = http_get(TREASURY_ANNOUNCED, {"format": "json", "type": "Bond"})
-    if data is None and bonds is None:
+    tentative_raw = http_get(TREASURY_TENTATIVE, as_json=False)
+    if data is None and bonds is None and tentative_raw is None:
         return None
     rows = (data or []) + (bonds or [])
     out = []
@@ -119,14 +152,18 @@ def treasury_long_auctions(start: dt.date, end: dt.date) -> list[dict] | None:
         if not (start <= d <= end):
             continue
         term = (r.get("securityTerm") or "").strip()
-        if not any(t in term for t in ("10-Year", "20-Year", "30-Year")):
+        if term not in ("10-Year", "30-Year"):
             continue
         out.append({"date": auc, "term": term,
                     "security_type": r.get("securityType"),
-                    "cusip": r.get("cusip")})
-    # De-duplicate: reopenings can announce the same auction more than once.
+                    "cusip": r.get("cusip"), "tentative": False,
+                    "source": "TreasuryDirect announced"})
+    if tentative_raw is not None:
+        out.extend(parse_treasury_tentative(tentative_raw, start, end))
+    # De-duplicate: prefer an announced fact over the tentative calendar.
     seen, uniq = set(), []
-    for r in sorted(out, key=lambda x: (x["date"], x["term"])):
+    for r in sorted(out, key=lambda x: (
+            x["date"], x["term"], bool(x.get("tentative")))):
         k = (r["date"], r["term"])
         if k not in seen:
             seen.add(k)
@@ -394,6 +431,24 @@ def main() -> int:
                                   int(cfg["fred"]["observation_limit"]))
             if pv:
                 result["priors"][key] = pv
+
+    # Some schedules use another official source but still use FRED for the
+    # latest observed value (for example Census durable goods).
+    if api_key:
+        for e in wl:
+            if e.get("source") == "fred" or not e.get("fred_series"):
+                continue
+            pv = fred_prior_value(api_key, e["fred_series"],
+                                  int(cfg["fred"]["observation_limit"]))
+            if pv:
+                result["priors"][e["key"]] = pv
+
+    fred_entries = [e for e in wl if e.get("source") == "fred"]
+    if api_key and ids and fred_entries and not result["fred"]:
+        result["failures"].append({
+            "source": "fred", "severity": "critical",
+            "reason": "全部 FRED 白名单请求失败；本次宏观日历骨干不可用",
+        })
 
     bls = bls_schedule()
     if bls is None:

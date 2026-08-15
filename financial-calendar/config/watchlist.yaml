@@ -4,9 +4,30 @@
 #
 # ⚠ 非美上市标的（A 股、港股）不在本 skill 范围内，录入也不会被拉取。
 
-core: []
-  # 例：
-  # - {ticker: GOOGL, note: ""}
+core:
+  - {ticker: GOOGL, note: "Google（Class A）"}
+  - {ticker: MSFT}
+  - {ticker: NVDA}
+  - {ticker: PDD}
+  - {ticker: NOK}
+  - {ticker: TSLA}
+  - {ticker: TSM}
+  - {ticker: MU}
+  - {ticker: ORCL}
+  - {ticker: MRVL}
+  - {ticker: INTC}
+  - {ticker: AMD}
+  - {ticker: COHR}
+  - {ticker: LITE}
+  - {ticker: KLAC}
+  - {ticker: AMAT}
+  - {ticker: SPCX, note: "SpaceX"}
+  - {ticker: LLY}
+  - {ticker: PFE}
+  - {ticker: O}
+  - {ticker: AAOI}
+  - {ticker: NBIS}
+  - {ticker: BRK.B, yfinance_ticker: BRK-B}
 
 monitor: []
   # 例：

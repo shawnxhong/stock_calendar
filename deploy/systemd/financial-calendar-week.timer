@@ -1,0 +1,11 @@
+[Unit]
+Description=Sunday financial calendar shadow run
+
+[Timer]
+OnCalendar=Sun *-*-* 18:00:00 America/New_York
+Persistent=true
+AccuracySec=1min
+Unit=financial-calendar@week.service
+
+[Install]
+WantedBy=timers.target

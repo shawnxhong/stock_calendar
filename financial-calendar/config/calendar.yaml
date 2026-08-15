@@ -74,15 +74,17 @@ market_closures: []
   # - {date: "YYYY-MM-DD", label: "临时休市", source: "https://...", verified: true}
 
 # 指数再平衡生效日。再平衡交易在生效日收盘执行，提前 5 个交易日标记。
-# ⚠ FTSE Russell 自 2026 年起改为半年度重构（6 月 + 11 月）。
-#   11 月日期在官方公布前为占位符，必须核实后才可信任。
+# ⚠ FTSE Russell 自 2026 年起改为半年度重构。2026 年 4 月的官方更新
+#   将第二次生效日定为 12 月第二个周五，取代更早的 11 月暂定安排。
 reconstitutions:
   - {date: "2026-06-26", index: "Russell", verified: true,
      source: "https://www.lseg.com/en/ftse-russell/russell-reconstitution",
      source_checked_at: "2026-08-12",
      note: "FTSE Russell 官方页面确认 2026-06-26 美股收盘后生效"}
-  - {date: "2026-11-20", index: "Russell", verified: false,
-     note: "占位符 —— 半年度重构，官方公布后必须核实"}
+  - {date: "2026-12-11", index: "Russell", verified: true,
+     source: "https://www.lseg.com/en/insights/ftse-russell/russell-reconstitution-2026-is-approaching-heres-what-you-need-to-know",
+     source_checked_at: "2026-08-14",
+     note: "LSEG 官方更新确认 2026 年第二次重构于 12 月第二个周五收盘后生效"}
   # S&P 季度再平衡生效于三重魔咒周五，由脚本自动生成，此处无需录入。
 
 # 回购静默期强度：标普 500 市值中处于回购静默窗口的比例，
@@ -117,6 +119,9 @@ private_releases:
   - {<<: *umich_verified, date: "2026-11-20", note: "终值"}
   - {<<: *umich_verified, date: "2026-12-04", note: "初值"}
   - {<<: *umich_verified, date: "2026-12-18", note: "终值"}
+  - &beige_book_verified {key: beige_book, date: "2026-09-02", verified: true, source: "https://www.federalreserve.gov/monetarypolicy/publications/beige-book-default.htm", source_checked_at: "2026-08-14"}
+  - {<<: *beige_book_verified, date: "2026-10-14"}
+  - {<<: *beige_book_verified, date: "2026-11-25"}
   # 格式：
   # - {key: ism_manufacturing, date: "YYYY-MM-DD"}
   # - {key: umich, date: "YYYY-MM-DD", note: "初值"}

@@ -106,7 +106,7 @@
 | BLS `bls.gov/schedule/news_release/bls.ics` | 劳工部全部发布，带精确时点 | ICS 解析，`icalendar` |
 | BEA / Census 日程页 | GDP/PCE/贸易/耐用品 | HTML，与 FRED 交叉验证 |
 | federalreserve.gov FOMC calendar | 会议、纪要、SEP、发布会 | 一年前公布，年度人工确认 |
-| TreasuryDirect `TA_WS/securities/announced` | 国债拍卖 | JSON，无需 key |
+| Treasury tentative XML + TreasuryDirect `announced` | 10y/30y 国债拍卖 | 半年前瞻；公告覆盖 tentative |
 
 ### 分级白名单（已确认）
 
@@ -174,7 +174,7 @@ Finnhub `/calendar/earnings`（免费层，按 watchlist 过滤）为主，yfina
 - 回购静默期强度：相对季末的静态季节曲线（分段线性插值，配置于 `calendar.yaml`）
 
 人工维护部分（`config/calendar.yaml`）：
-- Russell recon 生效日。**注意：FTSE Russell 自 2026 起改为半年度（6 月 + 11 月），11 月日期需在官方公布后核实，当前为占位符——实施时作为待核实项挂着**
+- Russell recon 生效日。**实施更新：LSEG 2026-04-10 官方说明将第二次 2026 重构定为 12 月第二个周五；当前已核实为 2026-12-11。**
 - MSCI 季度审核等 `manual_events`
 
 Agent 可在你提供或要求核实时**追加**已核实日期，**绝不编造**。
