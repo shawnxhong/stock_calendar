@@ -23,8 +23,9 @@ class DeliveryTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
-        # Point ledger at a temp file so tests never touch runtime/.
+        # Point ledger + archive at temp paths so tests never touch runtime/.
         deliver_im.LEDGER = self.dir / "im_delivery.json"
+        deliver_im.IM_ARCHIVE = self.dir / "im-delivery"
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -68,6 +69,16 @@ class FanOutTest(DeliveryTest):
         self.assertEqual(set(failed), {"feishu", "weixin"})
         self.assertEqual(ledger["k"]["feishu"]["status"], "failed")
         self.assertEqual(ledger["k"]["weixin"]["status"], "failed")
+
+    def test_archive_written_on_success(self):
+        ledger = {}
+        with mock.patch.object(deliver_im, "hermes_send", return_value=True):
+            deliver_im._fan_out(CFG["channels"], ledger, "2026-08-14-day-abcd",
+                                "CPI\n", dry_run=False)
+        for name in ("feishu", "weixin"):
+            p = self.dir / "im-delivery" / f"2026-08-14-day-abcd-{name}.md"
+            self.assertTrue(p.exists(), f"missing archive for {name}")
+            self.assertEqual(p.read_text(encoding="utf-8"), "CPI\n")
 
 
 class DispatchTest(DeliveryTest):

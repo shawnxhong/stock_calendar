@@ -10,6 +10,7 @@ runtime/
 financial-calendar/data/*.json
 financial-calendar/data/snapshots/*.json
 financial-calendar/logs/*.md
+financial-calendar/im-delivery/
 financial-calendar/config/release_ids.yaml
 financial-calendar/config/events_review.yaml
 

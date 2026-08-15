@@ -3,7 +3,8 @@
 Reads the latest report + health.json produced by run.py and delivers the
 short IM version to the configured channels (Feishu, WeChat) via `hermes send`.
 Per-channel idempotency is recorded in DATA/im_delivery.json so a partially
-failed fan-out retries only the failed channels on the next poll.
+failed fan-out retries only the failed channels on the next poll. Each
+successful send archives the exact text to IM_ARCHIVE/{key}-{channel}.md.
 
     python scripts/deliver_im.py             # deliver pending channels
     python scripts/deliver_im.py --dry-run   # print what WOULD be sent, send nothing
@@ -14,10 +15,17 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from common import DATA, load_yaml, now_utc_iso, read_json, write_json
+from common import (DATA, atomic_write_text, load_yaml, now_utc_iso,
+                    read_json, write_json)
 
 LEDGER = DATA / "im_delivery.json"
+IM_ARCHIVE = DATA.parent / "im-delivery"
 _BANNER_MARK = "⚠"
+
+
+def _safe_key(key: str) -> str:
+    """Make an idempotency/alert key safe for use as a filename stem."""
+    return key.replace(":", "_").replace("/", "_").replace("+", "_")
 
 
 def _cfg() -> dict:
@@ -77,6 +85,7 @@ def _fan_out(entries: list[dict], ledger: dict, key: str, text: str,
             continue
         if hermes_send(target, text):
             ledger.setdefault(key, {})[name] = {"status": "ok", "at": now_utc_iso()}
+            atomic_write_text(IM_ARCHIVE / f"{_safe_key(key)}-{name}.md", text)
             print(f"[ok] {key} -> {name}")
         else:
             ledger.setdefault(key, {})[name] = {"status": "failed", "at": now_utc_iso()}
