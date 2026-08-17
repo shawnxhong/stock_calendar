@@ -8,6 +8,7 @@ runtime/
 
 # Runtime state and generated reports
 financial-calendar/data/*.json
+financial-calendar/data/.run.lock
 financial-calendar/data/snapshots/*.json
 financial-calendar/logs/*.md
 financial-calendar/im-delivery/

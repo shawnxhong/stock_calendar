@@ -81,6 +81,19 @@ class DiffOperationalTests(unittest.TestCase):
 
 
 class SourceFallbackTests(unittest.TestCase):
+    def test_bls_schedule_uses_calendar_client_headers(self) -> None:
+        with mock.patch.object(fetch_macro, "http_get", return_value=None) as get:
+            self.assertIsNone(fetch_macro.bls_schedule())
+        get.assert_called_once_with(
+            fetch_macro.BLS_ICS, as_json=False, headers=fetch_macro.BLS_HEADERS)
+        self.assertTrue(fetch_macro.BLS_HEADERS["User-Agent"].startswith("Mozilla/"))
+        self.assertIn("text/calendar", fetch_macro.BLS_HEADERS["Accept"])
+
+    def test_bls_empty_calendar_is_source_unavailable(self) -> None:
+        empty_ics = b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n"
+        with mock.patch.object(fetch_macro, "http_get", return_value=empty_ics):
+            self.assertIsNone(fetch_macro.bls_schedule())
+
     def test_yfinance_ticker_failure_carries_only_that_tickers_events(self) -> None:
         day = common.today_et() + dt.timedelta(days=7)
         iso, confidence = common.et_to_utc(day, "16:30")
@@ -122,7 +135,7 @@ class SourceFallbackTests(unittest.TestCase):
                                side_effect=lambda name: (
                                    {"macro": []} if name == "events.yaml"
                                    else calendar if name == "calendar.yaml" else {})), \
-             mock.patch.object(fetch_macro, "bls_schedule", return_value=[]), \
+             mock.patch.object(fetch_macro, "bls_schedule", return_value=None), \
              mock.patch.object(fetch_macro, "treasury_long_auctions",
                                return_value=[{"date": "2026-08-13",
                                               "term": "10-Year"}]), \
@@ -142,6 +155,10 @@ class SourceFallbackTests(unittest.TestCase):
         self.assertTrue(any(f["source"] == "fred" and
                             f["severity"] == "critical"
                             for f in written["failures"]))
+        bls_failure = next(f for f in written["failures"]
+                           if f["source"] == "bls_ics")
+        self.assertEqual(bls_failure["severity"], "advisory")
+        self.assertEqual(bls_failure["impact"], "cross_check_only")
 
 
 class RenderingFailureTests(unittest.TestCase):
@@ -161,6 +178,17 @@ class RenderingFailureTests(unittest.TestCase):
         self.assertIn("🚨", output)
         self.assertLessEqual(len(output.rstrip().splitlines()), 15)
 
+    def test_bls_cross_check_failure_is_a_soft_notice(self) -> None:
+        # Legacy cached failures have no explicit advisory severity.
+        self.doc["failures"] = [{
+            "source": "bls_ics", "reason": "获取或解析失败",
+        }]
+        output = render.render_week(self.doc, [], self.cfg, short=True)
+        self.assertIn("ℹ bls_ics 辅助校验暂不可用", output)
+        self.assertIn("主要日程不受此项影响", output)
+        self.assertNotIn("相关事件可能缺失", output)
+        self.assertLessEqual(len(output.rstrip().splitlines()), 15)
+
     def test_stale_over_three_days_degrades_to_history_only(self) -> None:
         old = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=4)
         self.doc["source_fetched_at"]["macro"] = old.isoformat()
@@ -177,14 +205,16 @@ class RenderingFailureTests(unittest.TestCase):
         lines = output.rstrip().splitlines()
         self.assertFalse(lines[-2].startswith("### "))
 
-    def test_week_short_distinguishes_no_priority_events_from_no_events(self) -> None:
+    def test_week_short_lists_b_events_without_dead_long_version_copy(self) -> None:
         day = common.today_et() + dt.timedelta(days=1)
         event = macro("manual:b", day)
         event["tier"] = "B"
         self.doc["events"] = [event]
         output = render.render_week(self.doc, [], self.cfg, short=True)
-        self.assertIn("本周重点日程", output)
-        self.assertIn("无 A 类或 core 财报；B/C 见长版", output)
+        self.assertIn("本周 A/B 日程", output)
+        self.assertIn("🟡 中等", output)
+        self.assertNotIn("见长版", output)
+        self.assertLessEqual(len(output.rstrip().splitlines()), 15)
 
 
 class IdempotencyTests(unittest.TestCase):
@@ -272,7 +302,7 @@ class OrchestratorFailureTests(unittest.TestCase):
         self.assertEqual(
             run.fred_config_gaps({"cpi": {"release_id": 10}}, entries), set())
 
-    def test_noncritical_failure_health_is_degraded(self) -> None:
+    def test_bls_cross_check_failure_keeps_health_healthy(self) -> None:
         import tempfile
         with tempfile.TemporaryDirectory() as td, \
              mock.patch.object(run, "DATA", Path(td)):
@@ -281,7 +311,39 @@ class OrchestratorFailureTests(unittest.TestCase):
                 delivery={"configured": False}, outputs=[])
             health = common.read_json(Path(td) / "health.json")
         self.assertTrue(health["healthy"])
+        self.assertEqual(health["status"], "healthy")
+        self.assertEqual(health["advisory_failure_count"], 1)
+
+    def test_noncritical_primary_failure_health_is_degraded(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td, \
+             mock.patch.object(run, "DATA", Path(td)):
+            run._write_health(
+                healthy=True, tier="week", failures=[{"source": "treasury"}],
+                delivery={"configured": False}, outputs=[])
+            health = common.read_json(Path(td) / "health.json")
+        self.assertTrue(health["healthy"])
         self.assertEqual(health["status"], "degraded")
+        self.assertEqual(health["advisory_failure_count"], 0)
+
+    def test_render_only_run_does_not_write_health(self) -> None:
+        # A render-only run (no delivery config) must not write health.json:
+        # the IM dispatcher would otherwise see a stale idempotency key and
+        # re-deliver under a filename fallback key (the duplicate-delivery bug).
+        import tempfile
+        with tempfile.TemporaryDirectory() as td, \
+             mock.patch.object(run, "DATA", Path(td)), \
+             mock.patch.object(run, "LOGS", Path(td)), \
+             mock.patch.object(render, "DATA", Path(td)), \
+             mock.patch.dict("os.environ", {"FINCAL_DELIVERY_DIR": ""}):
+            common.write_json(Path(td) / "events.json", {
+                "events": [], "failures": [],
+                "source_fetched_at": {"macro": common.now_utc_iso()},
+                "blackout_profile": {},
+            })
+            code = run._run_tier("day", True, None)  # no_fetch=True, no delivery
+        self.assertEqual(code, 0)
+        self.assertFalse((Path(td) / "health.json").exists())
 
 
 class ManualWindowTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 ---
 name: us-stock-financial-calendar
-description: Passive-push US financial calendar. Pulls official release schedules (FRED, BLS, BEA, Census, TreasuryDirect), watchlist earnings dates with explicit confirmed/estimated confidence, and a pure-date-math mechanical calendar (OPEX, triple witching, month/quarter end, index reconstitution, buyback blackout), diffs them against the last snapshot to surface date changes, and renders monthly / weekly / daily briefs in both a short IM version and a long email version. Use this skill whenever the user or an agent asks to run the financial calendar, 财经日历, econ calendar, macro calendar, the monthly/weekly/daily brief, what's happening this week/month, upcoming FOMC or CPI or NFP dates, watchlist earnings dates, or to edit the calendar configs (events.yaml, watchlist.yaml, calendar.yaml, settings.yaml). Covers US macro and US-listed watchlist earnings only. It does NOT estimate flow magnitude or direction (CTA positioning, vol-control deleveraging, dealer gamma) — that lives in EEI.
+description: Passive-push US financial calendar. Pulls official release schedules (FRED, BLS, BEA, Census, TreasuryDirect), watchlist earnings dates with explicit confirmed/estimated confidence, and a pure-date-math mechanical calendar (OPEX, triple witching, month/quarter end, index reconstitution, buyback blackout), diffs them against the last snapshot to surface date changes, and renders monthly / weekly / daily briefs in a delivered short IM version plus a local long version. Use this skill whenever the user or an agent asks to run the financial calendar, 财经日历, econ calendar, macro calendar, the monthly/weekly/daily brief, what's happening this week/month, upcoming FOMC or CPI or NFP dates, watchlist earnings dates, or to edit the calendar configs (events.yaml, watchlist.yaml, calendar.yaml, settings.yaml). Covers US macro and US-listed watchlist earnings only. It does NOT estimate flow magnitude or direction (CTA positioning, vol-control deleveraging, dealer gamma) — that lives in EEI.
 ---
 
 # 财经日历 — heads-up 系统
@@ -81,10 +81,16 @@ python scripts/run.py --tier=month    # 每月第一个自然日
 python scripts/run.py --tier=week --no-fetch   # 用缓存数据重渲染
 ```
 
-输出：`logs/YYYY-MM-DD-<tier>.md`（长版，邮件）与 `-short.md`（短版，IM，≤15 行）。
+输出：`logs/YYYY-MM-DD-<tier>.md`（长版，本地归档）与 `-short.md`（短版，IM，≤15 行）。
+投递分层：飞书/微信收短版，邮箱（email:Flood）收长版；因此周短版直接列出 A/B 类事件，
+不得用“B/C 见长版”指向收件人无法访问的本地文件。
 设置 `FINCAL_DATA_DIR`、`FINCAL_LOG_DIR`、`FINCAL_DELIVERY_DIR` 后可使用独立生产
 持久目录和 shadow 文件投递；幂等键由日期、tier 与渲染内容哈希组成，adapter 成功后
-才记录状态。
+才记录状态。dispatcher 缺幂等键时拒绝发送（不做文件名兜底）。
+
+**生产手动触发只经 `deploy/hermes/fincal_run.sh` wrapper**（注入全部三个环境变量）。
+禁止直接 `run.py --no-fetch`：会误读 `financial-calendar/data/` 开发缓存，或在未设
+`FINCAL_DELIVERY_DIR` 时覆盖生产 health.json，导致 dispatcher 用文件名兜底重复投递。
 
 ## 数据健康与失败处理
 
@@ -93,6 +99,7 @@ python scripts/run.py --tier=week --no-fetch   # 用缓存数据重渲染
 | FRED 不可用 | 用上次快照渲染，顶部标注"数据陈旧 N 天"，绝不静默 |
 | 某源缺失单个事件 | 标 `STALE` 保留上次值；**连续 2 次缺失**才判 `CANCELLED` |
 | 静态时点表与 BLS ICS 冲突 | 同时显示两个值并告警，不自动择一 |
+| BLS ICS 403/解析失败 | 记为辅助交叉验证 advisory；短版软提示，主数据 health 不降级 |
 | 财报两源不一致 | 取更晚日期（更保守），标注分歧 |
 | 陈旧 > 3 天 | 降级为"仅历史快照"，A 类仍推送但打警示标 |
 

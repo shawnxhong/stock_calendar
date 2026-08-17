@@ -224,3 +224,13 @@ def norm(s: str) -> str:
 
 def tier_rank(tier: str) -> int:
     return {"A": 0, "B": 1, "C": 2}.get(tier, 3)
+
+
+def is_advisory_failure(failure: dict) -> bool:
+    """Return whether a source failure does not remove primary event data.
+
+    The source-name fallback keeps cached snapshots produced before advisory
+    severity was added from turning BLS cross-check loss into a hard warning.
+    """
+    return (failure.get("severity") == "advisory"
+            or failure.get("source") == "bls_ics")

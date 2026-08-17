@@ -72,20 +72,55 @@ def _short_path(health: dict) -> Path | None:
     return None
 
 
-def _fan_out(entries: list[dict], ledger: dict, key: str, text: str,
+def _long_path(health: dict) -> Path | None:
+    """Long (non-short) report path from health.outputs, if any."""
+    for p in health.get("outputs") or []:
+        if p.endswith(".md") and not p.endswith("-short.md"):
+            return Path(p)
+    return None
+
+
+def _resolve_texts(cfg: dict, health: dict, short_text: str) -> dict[str, str]:
+    """Map channel name -> body, honoring per-channel ``version`` (short/long).
+
+    ``version: long`` channels (e.g. email) receive the full report; every
+    other channel receives the short IM version.
+    """
+    long_text = short_text
+    lp = _long_path(health)
+    if lp and lp.exists():
+        long_text = lp.read_text(encoding="utf-8").strip()
+    return {
+        ch["name"]: long_text if ch.get("version") == "long" else short_text
+        for ch in cfg.get("channels") or []
+        if isinstance(ch, dict)
+    }
+
+
+def _fan_out(entries: list, ledger: dict, key: str, text: str | dict,
              dry_run: bool) -> list[str]:
-    """Deliver text to each pending channel; return failed channel names."""
+    """Deliver to each pending channel; return failed channel names.
+
+    ``entries`` may be channel names (alerts — same body for all) or channel
+    dicts. ``text`` is either a str (same body for every channel) or a dict
+    mapping channel name -> body (per-channel short/long routing).
+    """
     failed = []
     for ch in entries:
-        name, target = ch["name"], ch.get("target") or ch["name"]
+        if isinstance(ch, str):
+            name = target = ch
+        else:
+            name = ch["name"]
+            target = ch.get("target") or ch["name"]
+        body: str = text[name] if isinstance(text, dict) else text
         if channel_done(ledger, key, name):
             continue
         if dry_run:
-            print(f"[dry-run] -> {name} ({target}):\n{text}\n")
+            print(f"[dry-run] -> {name} ({target}):\n{body}\n")
             continue
-        if hermes_send(target, text):
+        if hermes_send(target, body):
             ledger.setdefault(key, {})[name] = {"status": "ok", "at": now_utc_iso()}
-            atomic_write_text(IM_ARCHIVE / f"{_safe_key(key)}-{name}.md", text)
+            atomic_write_text(IM_ARCHIVE / f"{_safe_key(key)}-{name}.md", body)
             print(f"[ok] {key} -> {name}")
         else:
             ledger.setdefault(key, {})[name] = {"status": "failed", "at": now_utc_iso()}
@@ -111,8 +146,17 @@ def dispatch(health: dict, cfg: dict, ledger: dict, dry_run: bool) -> int:
     if status == "degraded" and _BANNER_MARK not in text[:200]:
         text = "⚠ 部分数据源异常，简报可能不完整\n\n" + text
 
-    key = (health.get("delivery") or {}).get("idempotency_key") or short.stem
-    failed = _fan_out(cfg["channels"], ledger, key, text, dry_run)
+    key = (health.get("delivery") or {}).get("idempotency_key")
+    if not key:
+        # A render-only run (run.py --no-fetch without FINCAL_DELIVERY_DIR)
+        # overwrote health.json without an idempotency key. Falling back to
+        # the filename stem here re-delivers already-sent content under a new
+        # key, so we refuse instead.
+        print("[skip] delivery.idempotency_key 缺失 —— 拒绝发送（不做文件名兜底）")
+        return 0
+
+    texts = _resolve_texts(cfg, health, text)
+    failed = _fan_out(cfg["channels"], ledger, key, texts, dry_run)
     return 1 if failed else 0
 
 

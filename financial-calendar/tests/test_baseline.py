@@ -260,6 +260,26 @@ class RenderingTests(unittest.TestCase):
                 output = renderer(doc, [], cfg, short=True)
                 self.assertLessEqual(len(output.rstrip().splitlines()), 15)
 
+    def test_tier_titles_carry_us_outlook_prefix(self) -> None:
+        cfg = common.load_yaml("settings.yaml")
+        doc = {
+            "events": [],
+            "failures": [],
+            "source_fetched_at": {"macro": common.now_utc_iso()},
+            "blackout_profile": {},
+        }
+        expected = {
+            "render_day": "美国财经事件前瞻 · 日报",
+            "render_week": "美国财经事件前瞻 · 周报",
+            "render_month": "美国财经事件前瞻 · 月报",
+        }
+        for name, prefix in expected.items():
+            with self.subTest(renderer=name):
+                output = getattr(render, name)(doc, [], cfg, short=False)
+                first = output.splitlines()[0]
+                self.assertTrue(first.startswith(f"# {prefix}"),
+                                f"{name} title was: {first!r}")
+
 
 class NoKeyTests(unittest.TestCase):
     def test_env_key_missing_exits_cleanly(self) -> None:

@@ -27,6 +27,17 @@ from common import (DATA, env_key, http_get, load_yaml, norm, now_utc_iso,  # no
 FRED_RELEASE_DATES = "https://api.stlouisfed.org/fred/release/dates"
 FRED_OBSERVATIONS = "https://api.stlouisfed.org/fred/series/observations"
 BLS_ICS = "https://www.bls.gov/schedule/news_release/bls.ics"
+BLS_HEADERS = {
+    # BLS documents this endpoint for browser/calendar-client subscriptions.
+    # A browser-shaped request avoids rejecting clients solely for the generic
+    # skill User-Agent; an Akamai IP-level 403 remains an advisory failure.
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "Chrome/131.0 Safari/537.36"
+    ),
+    "Accept": "text/calendar,text/plain;q=0.9,*/*;q=0.8",
+    "Referer": "https://www.bls.gov/schedule/",
+}
 TREASURY_ANNOUNCED = "https://www.treasurydirect.gov/TA_WS/securities/announced"
 TREASURY_TENTATIVE = (
     "https://home.treasury.gov/system/files/221/Tentative-Auction-Schedule.xml"
@@ -75,7 +86,7 @@ def fred_prior_value(api_key: str, series_id: str, limit: int) -> dict | None:
 
 def bls_schedule() -> list[dict] | None:
     """BLS publishes an ICS with exact release datetimes — the time authority."""
-    raw = http_get(BLS_ICS, as_json=False)
+    raw = http_get(BLS_ICS, as_json=False, headers=BLS_HEADERS)
     if raw is None:
         return None
     try:
@@ -98,7 +109,7 @@ def bls_schedule() -> list[dict] | None:
         else:
             out.append({"summary": summary, "date": val.isoformat(),
                         "has_time": False})
-    return out
+    return out or None
 
 
 # ── Treasury ─────────────────────────────────────────────────────────────────
@@ -452,7 +463,11 @@ def main() -> int:
 
     bls = bls_schedule()
     if bls is None:
-        result["failures"].append({"source": "bls_ics", "reason": "获取或解析失败"})
+        result["failures"].append({
+            "source": "bls_ics", "severity": "advisory",
+            "impact": "cross_check_only",
+            "reason": "BLS 时点交叉验证获取或解析失败；主要日程源不受影响",
+        })
     else:
         result["bls"] = bls
 

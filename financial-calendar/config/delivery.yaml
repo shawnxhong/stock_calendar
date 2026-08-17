@@ -1,10 +1,14 @@
-# IM 投递配置（试运行：飞书 + 微信；邮箱暂缓）
+# IM 投递配置（生产：飞书 + 微信收短版；邮箱收长版）
 # target 取自 `hermes send --list`，裸平台名（如 feishu）等价于发到 home channel。
+# version: short（默认，IM 短版）| long（完整长版，供邮箱归档阅读）
 channels:
   - name: feishu
     target: "feishu:oc_15d5a425d3c28cdb26e478ffb3756d4c"
   - name: weixin
     target: "weixin:o9cq8011Q4LVTWBemTNixwnMq3gg@im.wechat"
+  - name: email
+    target: "email:Flood"
+    version: long
 
 # unhealthy 时只发告警到这些通道（不含微信，避免消耗 iLink 配额）
 alert_channels:

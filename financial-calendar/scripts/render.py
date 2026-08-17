@@ -18,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import resonance  # noqa: E402
 from common import (DATA, WEEKDAY_CN, et_date, fmt_dual, parse_utc,  # noqa: E402
-                    read_json, settings, tier_rank, today_et)
+                    is_advisory_failure, read_json, settings, tier_rank,
+                    today_et)
 
 TIER_MARK = {"A": "🔴 重要", "B": "🟡 中等", "C": "⚪ 次要"}
 CHANGE_MARK = {"MOVED": "⚠ 改期", "CANCELLED": "⚠ 取消", "CONFIRMED": "✅ 已确认",
@@ -49,15 +50,23 @@ def _failure_banner(doc: dict) -> list[str]:
     fails = doc.get("failures") or []
     if not fails:
         return []
-    crit = [f for f in fails if f.get("severity") == "critical"]
+    advisory = [f for f in fails if is_advisory_failure(f)]
+    crit = [f for f in fails if f.get("severity") == "critical"
+            and not is_advisory_failure(f)]
     lines = []
     for f in crit:
         lines.append(f"🚨 **{f.get('source')} 源失败：{f.get('reason')}** "
                      "—— 本简报不完整，请勿据此判断日程")
-    others = [f for f in fails if f.get("severity") != "critical"]
+    others = [f for f in fails if f.get("severity") != "critical"
+              and not is_advisory_failure(f)]
     if others:
         names = "、".join(str(f.get("key") or f.get("source")) for f in others[:6])
         lines.append(f"⚠ {len(others)} 项拉取失败（{names}），相关事件可能缺失")
+    if advisory:
+        names = "、".join(str(f.get("key") or f.get("source"))
+                         for f in advisory[:6])
+        lines.append(
+            f"ℹ {names} 辅助校验暂不可用；FRED/Census/BEA 等主要日程不受此项影响")
     return lines + [""] if lines else []
 
 
@@ -127,7 +136,7 @@ def _changes_block(changes: list[dict], limit: int | None = None,
             lines.append(f"- {mark} {c['label']}："
                          + (_short_date(c['new']) if compact else c['new_display']))
     if limit is not None and len(changes) > limit:
-        lines.append(f"- …另有 {len(changes) - limit} 条变更，见长版")
+        lines.append(f"- …另有 {len(changes) - limit} 条变更（受短版行数限制）")
     lines.append("")
     return lines
 
@@ -167,7 +176,7 @@ def render_month(doc, changes, cfg, short: bool) -> str:
     conf, est = _split_earnings(evs)
     scope = {(start + dt.timedelta(days=i)).isoformat() for i in range(days + 1)}
 
-    L = [f"# 月度全景 · {start:%Y年%m月}", ""]
+    L = [f"# 美国财经事件前瞻 · 月报 · {start:%Y年%m月}", ""]
     L += _failure_banner(doc)
     age, warn = _staleness(doc, cfg)
     if warn:
@@ -219,7 +228,7 @@ def render_week(doc, changes, cfg, short: bool) -> str:
     conf, est = _split_earnings(evs)
     scope = {(start + dt.timedelta(days=i)).isoformat() for i in range(days + 1)}
 
-    L = [f"# 周度清单 · {start:%m/%d} 起", ""]
+    L = [f"# 美国财经事件前瞻 · 周报 · {start:%m/%d} 起", ""]
     L += _failure_banner(doc)
     age, warn = _staleness(doc, cfg)
     if warn:
@@ -232,23 +241,32 @@ def render_week(doc, changes, cfg, short: bool) -> str:
         by_day.setdefault(et_date(e["date_utc"]), []).append(e)
 
     if short:
-        keep = [e for e in conf if e["tier"] == "A"
-                or (e["kind"] == "earnings" and e.get("watchlist") == "core")]
+        # IM is the only delivered artifact. Include confirmed B events here
+        # instead of pointing readers at a local-only long report.
+        keep = [e for e in conf if e["tier"] in ("A", "B")]
         by_day = {}
         for e in keep:
             by_day.setdefault(et_date(e["date_utc"]), []).append(e)
 
-    L += ["## 📅 本周重点日程" if short else "## 📅 本周日程", ""]
+    L += ["## 📅 本周 A/B 日程" if short else "## 📅 本周日程", ""]
     if not by_day:
-        empty = "- （无 A 类或 core 财报；B/C 见长版）" if short else "- （无）"
+        empty = "- （无已确认 A/B 类事件）" if short else "- （无）"
         L += [empty, ""]
     for day in sorted(by_day):
-        L.append(f"### {day:%m/%d}（{WEEKDAY_CN[day.weekday()]}）")
+        # Short event lines already contain date and weekday. Omitting the
+        # duplicate day heading leaves more of the 15-line budget for B events.
+        if not short:
+            L.append(f"### {day:%m/%d}（{WEEKDAY_CN[day.weekday()]}）")
         L += [_line(e, short) for e in by_day[day]]
+        if not short:
+            L.append("")
+    if short and by_day:
         L.append("")
 
-    if est and not short:
-        L += ["## ❓ 可能落在本周（日期未确认）", ""]
+    if est:
+        heading = ("## ❓ A/B 类日期未确认" if short
+                   else "## ❓ 可能落在本周（日期未确认）")
+        L += [heading, ""]
         L += [_line(e, short) for e in est]
         L += [""]
 
@@ -274,7 +292,7 @@ def render_day(doc, changes, cfg, short: bool) -> str:
     today_evs = [e for e in conf if et_date(e["date_utc"]) == start]
     tmr_evs = [e for e in conf if et_date(e["date_utc"]) == tomorrow]
 
-    L = [f"# 日度提醒 · {start:%m/%d}（{WEEKDAY_CN[start.weekday()]}）", ""]
+    L = [f"# 美国财经事件前瞻 · 日报 · {start:%m/%d}（{WEEKDAY_CN[start.weekday()]}）", ""]
     L += _failure_banner(doc)
     age, warn = _staleness(doc, cfg)
     if warn:
@@ -307,7 +325,8 @@ def _finish(lines: list[str], cfg: dict, short: bool) -> str:
     kept = flat[:cap - 1]
     while kept and kept[-1].startswith("### "):
         kept.pop()
-    kept.append(f"…（另有 {len(flat) - len(kept)} 行，见长版）")
+    kept.append(
+        f"…（受 {cap} 行上限限制，另有 {len(flat) - len(kept)} 行未展示）")
     return "\n".join(kept).rstrip() + "\n"
 
 

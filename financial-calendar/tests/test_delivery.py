@@ -100,23 +100,27 @@ class DispatchTest(DeliveryTest):
 
     def test_degraded_prepends_banner_when_missing(self):
         short = self._short_file("今日无事件\n")
-        health = self._health("degraded", outputs=["x-day.md", str(short)])
+        health = self._health("degraded", outputs=["x-day.md", str(short)],
+                              delivery={"configured": True, "delivered": True,
+                                        "idempotency_key": "2026-08-17-day-abcd"})
         texts = []
         with mock.patch.object(
                 deliver_im, "_fan_out",
                 side_effect=lambda e, l, k, t, d: texts.append(t) or []):
             deliver_im.dispatch(health, CFG, {}, dry_run=False)
-        self.assertIn("数据源异常", texts[0])
+        self.assertIn("数据源异常", texts[0]["feishu"])
 
     def test_degraded_keeps_existing_banner(self):
         short = self._short_file("⚠ 数据陈旧 2 天\nCPI\n")
-        health = self._health("degraded", outputs=["x-day.md", str(short)])
+        health = self._health("degraded", outputs=["x-day.md", str(short)],
+                              delivery={"configured": True, "delivered": True,
+                                        "idempotency_key": "2026-08-17-day-abcd"})
         texts = []
         with mock.patch.object(
                 deliver_im, "_fan_out",
                 side_effect=lambda e, l, k, t, d: texts.append(t) or []):
             deliver_im.dispatch(health, CFG, {}, dry_run=False)
-        self.assertEqual(texts[0], "⚠ 数据陈旧 2 天\nCPI")  # no extra banner
+        self.assertEqual(texts[0]["feishu"], "⚠ 数据陈旧 2 天\nCPI")  # no extra banner
 
     def test_no_short_report_is_noop(self):
         health = self._health("healthy", outputs=[])
@@ -124,6 +128,39 @@ class DispatchTest(DeliveryTest):
             code = deliver_im.dispatch(health, CFG, {}, dry_run=False)
         self.assertEqual(code, 0)
         fan.assert_not_called()
+
+    def test_missing_idempotency_key_is_refused(self):
+        short = self._short_file("CPI\n")
+        health = self._health("healthy", outputs=["x-day.md", str(short)],
+                              delivery={"configured": True, "delivered": True})
+        # No delivery.idempotency_key — must refuse, not fall back to filename.
+        with mock.patch.object(deliver_im, "_fan_out") as fan:
+            code = deliver_im.dispatch(health, CFG, {}, dry_run=False)
+        self.assertEqual(code, 0)
+        fan.assert_not_called()
+
+    def test_long_version_routed_to_long_channels(self):
+        short = self._short_file("SHORT\n")
+        long = self.dir / "day.md"
+        long.write_text("LONG\n", encoding="utf-8")
+        health = self._health("healthy", outputs=[str(long), str(short)],
+                              delivery={"configured": True, "delivered": True,
+                                        "idempotency_key": "2026-08-17-day-abcd"})
+        cfg = {
+            "channels": [
+                {"name": "feishu", "target": "feishu:oc_x"},
+                {"name": "email", "target": "email:Flood", "version": "long"},
+            ],
+            "alerts": ["feishu", "telegram"],
+        }
+        sent = {}
+        with mock.patch.object(
+                deliver_im, "hermes_send",
+                side_effect=lambda t, x: sent.update({t: x}) or True):
+            code = deliver_im.dispatch(health, cfg, {}, dry_run=False)
+        self.assertEqual(code, 0)
+        self.assertEqual(sent["feishu:oc_x"], "SHORT")
+        self.assertEqual(sent["email:Flood"], "LONG")
 
 
 class HermesSendTest(DeliveryTest):

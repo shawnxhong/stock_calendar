@@ -24,7 +24,8 @@ sys.path.insert(0, str(HERE))
 import render as render_mod  # noqa: E402
 from adapters import DirectoryDelivery  # noqa: E402
 from common import (CONFIG, DATA, LOGS, atomic_write_text, load_yaml,  # noqa: E402
-                    now_utc_iso, read_json, today_et, write_json)
+                    is_advisory_failure, now_utc_iso, read_json,
+                    today_et, write_json)
 
 
 def _run(script: str) -> int:
@@ -78,12 +79,14 @@ def deliver_once(state: dict, adapter, *, tier: str, short: str, long: str,
 
 def _write_health(*, healthy: bool, tier: str, failures: list[dict],
                   delivery: dict, outputs: list[str]) -> None:
-    status = "healthy" if healthy and not failures else (
+    degrading = [f for f in failures if not is_advisory_failure(f)]
+    status = "healthy" if healthy and not degrading else (
         "degraded" if healthy else "unhealthy")
     write_json(DATA / "health.json", {
         "checked_at": now_utc_iso(), "healthy": healthy, "status": status,
         "tier": tier,
         "failure_count": len(failures), "failures": failures,
+        "advisory_failure_count": len(failures) - len(degrading),
         "delivery": delivery, "outputs": outputs,
     })
 
@@ -176,7 +179,9 @@ def doctor() -> int:
         nonlocal ok
         good = rows is not None and len(rows) > 0
         count = "n/a" if rows is None else str(len(rows))
-        print(f"  {'✅' if good else '❌'} {label}：{count} 条")
+        icon = "✅" if good else ("❌" if required else "ℹ")
+        note = "" if good or required else "（可选交叉验证；主数据不受影响）"
+        print(f"  {icon} {label}：{count} 条{note}")
         if required:
             ok &= good
 
@@ -324,12 +329,17 @@ def _run_tier(tier: str, no_fetch: bool, delivery_dir: str | None) -> int:
         action = "已写入 shadow 投递目录" if delivery["delivered"] else "内容未变化，跳过重复投递"
         print(f"[ok] {action}（{delivery['idempotency_key']}）")
     else:
-        print("[info] 未配置 delivery adapter；仅生成报告，不记录为已投递")
+        print("[info] 渲染模式（未配置 delivery）—— 仅生成报告，不写 health.json")
     failures = doc.get("failures") or []
     critical = [f for f in failures if f.get("severity") == "critical"]
-    _write_health(
-        healthy=not critical, tier=tier, failures=failures,
-        delivery=delivery, outputs=[str(out), str(out_s)])
+    if configured_delivery:
+        # Only the delivery (production) path writes health.json. The IM
+        # dispatcher consumes health.json and its idempotency key; a
+        # render-only run has neither, so writing one would clobber production
+        # delivery state and make the dispatcher fall back to a filename key.
+        _write_health(
+            healthy=not critical, tier=tier, failures=failures,
+            delivery=delivery, outputs=[str(out), str(out_s)])
     print("\n" + short_txt)
     return 2 if critical else 0
 
