@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import copy
 import importlib
 import json
 import sys
@@ -213,6 +214,57 @@ class EarningsTests(unittest.TestCase):
 
 
 class RenderingTests(unittest.TestCase):
+    def test_explanation_catalog_covers_macro_whitelist(self) -> None:
+        catalog = common.load_yaml("event_explanations.yaml").get("events") or {}
+        macro_keys = {
+            row["key"] for row in common.load_yaml("events.yaml").get("macro") or []
+        }
+        # Treasury events normalize to the provider-neutral `treasury` key.
+        macro_keys.remove("treasury_auction_long")
+        macro_keys.add("treasury")
+        self.assertEqual(macro_keys - set(catalog), set())
+
+    def test_event_explanations_are_configurable_and_versioned(self) -> None:
+        day = common.today_et() + dt.timedelta(days=1)
+        industrial = event("fred:13:test", day)
+        industrial["source_key"] = "industrial_production"
+        industrial["label"] = "工业产出"
+        industrial["tier"] = "B"
+        doc = {
+            "events": [industrial],
+            "failures": [],
+            "source_fetched_at": {"macro": common.now_utc_iso()},
+            "blackout_profile": {},
+        }
+        cfg = common.load_yaml("settings.yaml")
+
+        short = render.render_day(doc, [], cfg, short=True)
+        long = render.render_day(doc, [], cfg, short=False)
+        self.assertIn("｜解读：工厂、矿业和公用事业实际产量", short)
+        self.assertIn("是什么：衡量制造业、矿业和公用事业", long)
+        self.assertIn("为什么关注：", long)
+        self.assertIn("影响面：", long)
+
+        disabled = copy.deepcopy(cfg)
+        disabled["event_explanations"]["enabled"] = False
+        plain = render.render_day(doc, [], disabled, short=False)
+        self.assertNotIn("为什么关注：", plain)
+        self.assertNotIn("影响面：", plain)
+
+    def test_short_explanation_does_not_consume_an_extra_line(self) -> None:
+        day = common.today_et() + dt.timedelta(days=1)
+        industrial = event("fred:13:test", day)
+        industrial["source_key"] = "industrial_production"
+        industrial["label"] = "工业产出"
+        industrial["tier"] = "B"
+        cfg = common.load_yaml("settings.yaml")
+        with_explanation = render._line(
+            industrial, short=True,
+            explanations=render._explanation_catalog(cfg, short=True))
+        without_explanation = render._line(industrial, short=True)
+        self.assertEqual(len(with_explanation.splitlines()), 1)
+        self.assertEqual(len(without_explanation.splitlines()), 1)
+
     def test_estimated_earnings_not_in_confirmed_week_schedule(self) -> None:
         day = common.today_et() + dt.timedelta(days=1)
         iso, time_confidence = common.et_to_utc(day, "16:30")

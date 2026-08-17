@@ -17,9 +17,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import resonance  # noqa: E402
-from common import (DATA, WEEKDAY_CN, et_date, fmt_dual, parse_utc,  # noqa: E402
-                    is_advisory_failure, read_json, settings, tier_rank,
-                    today_et)
+from common import (DATA, WEEKDAY_CN, et_date, fmt_dual, load_yaml,  # noqa: E402
+                    parse_utc, is_advisory_failure, read_json, settings,
+                    tier_rank, today_et)
 
 TIER_MARK = {"A": "🔴 重要", "B": "🟡 中等", "C": "⚪ 次要"}
 CHANGE_MARK = {"MOVED": "⚠ 改期", "CANCELLED": "⚠ 取消", "CONFIRMED": "✅ 已确认",
@@ -96,13 +96,47 @@ def _short_date(iso: str) -> str:
     return f"{e:%m/%d}（{WEEKDAY_CN[e.weekday()]}）"
 
 
-def _line(ev: dict, short: bool = False) -> str:
+def _explanation_catalog(cfg: dict, short: bool) -> dict:
+    feature = cfg.get("event_explanations") or {}
+    enabled_for_version = feature.get(
+        "include_in_short" if short else "include_in_long", True)
+    if not feature.get("enabled", False) or not enabled_for_version:
+        return {}
+    name = str(feature.get("catalog") or "event_explanations.yaml")
+    return (load_yaml(name).get("events") or {})
+
+
+def _explanation_key(ev: dict) -> str | None:
+    if ev.get("source_key"):
+        return str(ev["source_key"])
+    if ev.get("kind") == "earnings":
+        return "earnings"
+    if ev.get("kind") == "policy":
+        return "policy"
+    event_id = str(ev.get("id") or "")
+    if event_id.startswith("mech:"):
+        parts = event_id.split(":", 2)
+        return parts[1] if len(parts) >= 2 else None
+    return None
+
+
+def _line(ev: dict, short: bool = False,
+          explanations: dict | None = None) -> str:
     mark = TIER_MARK.get(ev["tier"], ev["tier"])
     s = f"- {mark} {fmt_dual(ev['date_utc'], ev['time_confidence'])} — {ev['label']}"
+    explanation = (explanations or {}).get(_explanation_key(ev)) or {}
     if short:
-        # The IM version carries dates and names only; numbers live in the long
-        # version. Truncating mid-event is worse than omitting detail by design.
+        # Keep the explanation on the event's physical line: the hard line cap
+        # must not silently displace later events from the IM brief.
+        if explanation.get("short"):
+            s += f"｜解读：{explanation['short']}"
         return s
+    if explanation.get("what"):
+        s += f"\n  是什么：{explanation['what']}"
+    if explanation.get("why"):
+        s += f"\n  为什么关注：{explanation['why']}"
+    if explanation.get("scope"):
+        s += f"\n  影响面：{explanation['scope']}"
     if ev.get("prior_value"):
         s += f"\n  前值：{ev['prior_value']}"
     if ev.get("consensus"):
@@ -178,6 +212,7 @@ def render_month(doc, changes, cfg, short: bool) -> str:
     tiers = cfg["tiers"]["month"] if short else ["A", "B", "C"]
     evs = _window(doc["events"], start, days, tiers)
     conf, est = _split_earnings(evs)
+    explanations = _explanation_catalog(cfg, short)
     scope = {(start + dt.timedelta(days=i)).isoformat() for i in range(days + 1)}
 
     L = [f"# 美国财经事件前瞻 · 月报 · {start:%Y年%m月}", ""]
@@ -189,7 +224,7 @@ def render_month(doc, changes, cfg, short: bool) -> str:
 
     a_events = [e for e in conf if e["tier"] == "A"]
     L += ["## 🔴 本月重要事件", ""]
-    L += [_line(e, short) for e in a_events] or ["- （无）"]
+    L += [_line(e, short, explanations) for e in a_events] or ["- （无）"]
     L += [""]
 
     L += _resonance_block(doc["events"], scope)
@@ -210,7 +245,7 @@ def render_month(doc, changes, cfg, short: bool) -> str:
     mech = [e for e in conf if e["kind"] == "mechanical"]
     if mech and not short:
         L += ["## ⚙ 机械日历", ""]
-        L += [_line(e, short) for e in mech]
+        L += [_line(e, short, explanations) for e in mech]
         L += [""]
     bl = _blackout_line(doc)
     if bl and not short:
@@ -218,7 +253,7 @@ def render_month(doc, changes, cfg, short: bool) -> str:
 
     if est and not short:
         L += ["## ❓ 未确认财报日期", ""]
-        L += [_line(e, short) for e in est]
+        L += [_line(e, short, explanations) for e in est]
         L += [""]
 
     return _finish(L, cfg, short)
@@ -230,6 +265,7 @@ def render_week(doc, changes, cfg, short: bool) -> str:
     tiers = ["A", "B"] if short else ["A", "B", "C"]
     evs = _window(doc["events"], start, days, tiers)
     conf, est = _split_earnings(evs)
+    explanations = _explanation_catalog(cfg, short)
     scope = {(start + dt.timedelta(days=i)).isoformat() for i in range(days + 1)}
 
     L = [f"# 美国财经事件前瞻 · 周报 · {start:%m/%d} 起", ""]
@@ -261,7 +297,7 @@ def render_week(doc, changes, cfg, short: bool) -> str:
         # duplicate day heading leaves more of the 15-line budget for B events.
         if not short:
             L.append(f"### {day:%m/%d}（{WEEKDAY_CN[day.weekday()]}）")
-        L += [_line(e, short) for e in by_day[day]]
+        L += [_line(e, short, explanations) for e in by_day[day]]
         if not short:
             L.append("")
     if short and by_day:
@@ -271,7 +307,7 @@ def render_week(doc, changes, cfg, short: bool) -> str:
         heading = ("## ❓ A/B 类日期未确认" if short
                    else "## ❓ 可能落在本周（日期未确认）")
         L += [heading, ""]
-        L += [_line(e, short) for e in est]
+        L += [_line(e, short, explanations) for e in est]
         L += [""]
 
     if not short:
@@ -292,6 +328,7 @@ def render_day(doc, changes, cfg, short: bool) -> str:
     tiers = ["A", "B"] if short else ["A", "B", "C"]
     evs = _window(doc["events"], start, int(cfg["horizon_days"]["day"]), tiers)
     conf, est = _split_earnings(evs)
+    explanations = _explanation_catalog(cfg, short)
 
     today_evs = [e for e in conf if et_date(e["date_utc"]) == start]
     tmr_evs = [e for e in conf if et_date(e["date_utc"]) == tomorrow]
@@ -304,16 +341,16 @@ def render_day(doc, changes, cfg, short: bool) -> str:
     L += _changes_block(changes, limit=2 if short else None, compact=short)
 
     L += ["## 今日", ""]
-    L += [_line(e, short) for e in today_evs] or ["- （无）"]
+    L += [_line(e, short, explanations) for e in today_evs] or ["- （无）"]
     L += ["", "## 明日预告", ""]
-    L += [_line(e, short) for e in tmr_evs] or ["- （无）"]
+    L += [_line(e, short, explanations) for e in tmr_evs] or ["- （无）"]
     L += [""]
 
     if est and not short:
         near = [e for e in est if et_date(e["date_utc"]) <= tomorrow]
         if near:
             L += ["## ❓ 日期未确认", ""]
-            L += [_line(e, short) for e in near]
+            L += [_line(e, short, explanations) for e in near]
             L += [""]
 
     return _finish(L, cfg, short)

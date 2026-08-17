@@ -13,6 +13,7 @@
 - 生成 OPEX、三重魔咒、交易月末/季末和指数再平衡等机械事件。
 - 保存快照并检测 `NEW`、`MOVED`、`STALE`、`CANCELLED`、`CONFIRMED`。
 - 输出 ET 与北京时间双时区的长版邮件和不超过 15 行的 IM 短版。
+- 可选用人工维护的词典解释“是什么、为什么关注、影响面”，不临场生成市场判断。
 - 数据源失败时沿用有效快照并显示显著警报，避免静默缺失。
 - 短版经 IM 投递层推送到飞书+微信：按 `health.json` 门控、内容幂等、逐渠道独立记账与正文存档。
 
@@ -72,6 +73,18 @@ release ID，也不要把没有 `source` 和 `source_checked_at` 的日期标为
 `-short.md`。缺少 FRED key 时，系统仍会抓取无需 key 的官方源，但简报会明确标记
 FRED 数据不完整。
 
+事件解释默认开启。飞书/微信短版在事件同一行显示紧凑解读，邮箱长版显示完整三段说明；
+关闭时不会改变原有报告格式：
+
+```yaml
+# financial-calendar/config/settings.yaml
+event_explanations:
+  enabled: false
+```
+
+解释正文维护在 `financial-calendar/config/event_explanations.yaml`，只描述指标定义和
+常见影响渠道，不填写预测值或方向判断。
+
 本机生产 shadow 使用独立的 `runtime/` 持久目录，并启用文件投递内容幂等：
 
 ```bash
@@ -108,7 +121,7 @@ FINCAL_DELIVERY_DIR="$PWD/runtime/shadow-delivery" \
 python3 /home/hong/.codex/skills/.system/skill-creator/scripts/quick_validate.py financial-calendar
 ```
 
-当前本地回归包含 75 个测试，覆盖日期数学、DST、源失败、快照恢复、diff、防抖、
+当前本地回归包含 88 个测试，覆盖日期数学、DST、源失败、快照恢复、diff、防抖、
 短版上限、重复运行幂等和 IM 投递门控/幂等/存档。
 
 ## 上线边界

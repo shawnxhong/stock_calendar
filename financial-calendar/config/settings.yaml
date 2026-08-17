@@ -13,6 +13,13 @@ horizon_days:
 short_version:
   max_lines: 15  # IM 短版硬上限
 
+event_explanations:
+  # 开启后，解释从 event_explanations.yaml 的人工维护词典读取；agent 不临场生成。
+  enabled: true
+  include_in_short: true   # IM：追加同一行紧凑说明，不占用额外行数
+  include_in_long: true    # 邮件/归档：展示是什么、为什么关注、影响面
+  catalog: event_explanations.yaml
+
 consensus:
   top_n: 5       # 每周检索共识值的事件数上限（按 tier 排序）
 

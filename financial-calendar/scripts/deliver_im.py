@@ -1,7 +1,8 @@
-"""Deterministic IM delivery dispatcher.
+"""Deterministic report delivery dispatcher.
 
 Reads the latest report + health.json produced by run.py and delivers the
-short IM version to the configured channels (Feishu, WeChat) via `hermes send`.
+configured short or long version to each Hermes channel (for example, short to
+Feishu/WeChat and long to email) via `hermes send`.
 Per-channel idempotency is recorded in DATA/im_delivery.json so a partially
 failed fan-out retries only the failed channels on the next poll. Each
 successful send archives the exact text to IM_ARCHIVE/{key}-{channel}.md.

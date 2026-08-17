@@ -84,6 +84,9 @@ python scripts/run.py --tier=week --no-fetch   # 用缓存数据重渲染
 输出：`logs/YYYY-MM-DD-<tier>.md`（长版，本地归档）与 `-short.md`（短版，IM，≤15 行）。
 投递分层：飞书/微信收短版，邮箱（email:Flood）收长版；因此周短版直接列出 A/B 类事件，
 不得用“B/C 见长版”指向收件人无法访问的本地文件。
+`config/settings.yaml` 的 `event_explanations.enabled` 控制事件解释：开启时，短版在事件
+同一行追加紧凑说明，长版追加“是什么 / 为什么关注 / 影响面”。文字只从人工维护的
+`config/event_explanations.yaml` 读取，agent 不得根据当日行情临场生成或推断方向。
 设置 `FINCAL_DATA_DIR`、`FINCAL_LOG_DIR`、`FINCAL_DELIVERY_DIR` 后可使用独立生产
 持久目录和 shadow 文件投递；幂等键由日期、tier 与渲染内容哈希组成，adapter 成功后
 才记录状态。dispatcher 缺幂等键时拒绝发送（不做文件名兜底）。
