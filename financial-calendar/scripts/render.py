@@ -63,10 +63,14 @@ def _failure_banner(doc: dict) -> list[str]:
         names = "、".join(str(f.get("key") or f.get("source")) for f in others[:6])
         lines.append(f"⚠ {len(others)} 项拉取失败（{names}），相关事件可能缺失")
     if advisory:
-        names = "、".join(str(f.get("key") or f.get("source"))
-                         for f in advisory[:6])
-        lines.append(
-            f"ℹ {names} 辅助校验暂不可用；FRED/Census/BEA 等主要日程不受此项影响")
+        # advisory 只在 run.py 标记 notify 时提醒（首次出现/状态变化）；
+        # 持续存在的降级（如已知 BLS 403）不重复，避免训练读者忽略该通道。
+        to_notify = [f for f in advisory if f.get("notify")]
+        if to_notify:
+            names = "、".join(str(f.get("key") or f.get("source"))
+                             for f in to_notify[:6])
+            lines.append(
+                f"ℹ {names} 辅助校验暂不可用；FRED/Census/BEA 等主要日程不受此项影响")
     return lines + [""] if lines else []
 
 

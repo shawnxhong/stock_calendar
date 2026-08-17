@@ -157,14 +157,14 @@ WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周�
 
 
 def fmt_dual(iso: str, time_confidence: str) -> str:
-    """Render an instant as 'ET | 北京' side by side."""
+    """Render an instant as '美东时间 | 北京时间' side by side."""
     u = parse_utc(iso)
     e, c = u.astimezone(ET), u.astimezone(CN)
     if time_confidence != "exact":
         return f"{e:%m/%d}（{WEEKDAY_CN[e.weekday()]}）时点未定"
     same_day = "" if e.date() == c.date() else f"{c:%m/%d} "
-    return (f"{e:%m/%d}（{WEEKDAY_CN[e.weekday()]}）{e:%H:%M} ET"
-            f" | {same_day}{c:%H:%M} 北京")
+    return (f"{e:%m/%d}（{WEEKDAY_CN[e.weekday()]}）{e:%H:%M} 美东时间"
+            f" | {same_day}{c:%H:%M} 北京时间")
 
 
 def today_et() -> dt.date:

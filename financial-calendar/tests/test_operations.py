@@ -41,7 +41,7 @@ class TimezoneTests(unittest.TestCase):
     def test_beijing_date_rolls_forward(self) -> None:
         iso, confidence = common.et_to_utc(dt.date(2026, 8, 12), "16:30")
         rendered = common.fmt_dual(iso, confidence)
-        self.assertIn("08/13 04:30 北京", rendered)
+        self.assertIn("08/13 04:30 北京时间", rendered)
 
 
 class DiffOperationalTests(unittest.TestCase):
@@ -181,13 +181,20 @@ class RenderingFailureTests(unittest.TestCase):
     def test_bls_cross_check_failure_is_a_soft_notice(self) -> None:
         # Legacy cached failures have no explicit advisory severity.
         self.doc["failures"] = [{
-            "source": "bls_ics", "reason": "获取或解析失败",
+            "source": "bls_ics", "reason": "获取或解析失败", "notify": True,
         }]
         output = render.render_week(self.doc, [], self.cfg, short=True)
         self.assertIn("ℹ bls_ics 辅助校验暂不可用", output)
         self.assertIn("主要日程不受此项影响", output)
         self.assertNotIn("相关事件可能缺失", output)
         self.assertLessEqual(len(output.rstrip().splitlines()), 15)
+
+    def test_unchanged_advisory_is_suppressed_without_notify(self) -> None:
+        self.doc["failures"] = [{
+            "source": "bls_ics", "reason": "获取或解析失败",
+        }]
+        output = render.render_week(self.doc, [], self.cfg, short=True)
+        self.assertNotIn("辅助校验暂不可用", output)
 
     def test_stale_over_three_days_degrades_to_history_only(self) -> None:
         old = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=4)
@@ -344,6 +351,32 @@ class OrchestratorFailureTests(unittest.TestCase):
             code = run._run_tier("day", True, None)  # no_fetch=True, no delivery
         self.assertEqual(code, 0)
         self.assertFalse((Path(td) / "health.json").exists())
+
+    def test_advisory_notify_only_on_first_sight_or_change(self) -> None:
+        def advisory(reason: str) -> dict:
+            return {"source": "bls_ics", "severity": "advisory", "reason": reason}
+
+        state: dict = {}
+        # 首次出现 → notify
+        doc = {"failures": [advisory("403")]}
+        run._apply_advisory_notify(doc, state)
+        self.assertTrue(doc["failures"][0].get("notify"))
+        # 指纹不变 → 不再 notify
+        doc = {"failures": [advisory("403")]}
+        run._apply_advisory_notify(doc, state)
+        self.assertNotIn("notify", doc["failures"][0])
+        # 原因变化 → 再次 notify
+        doc = {"failures": [advisory("timeout")]}
+        run._apply_advisory_notify(doc, state)
+        self.assertTrue(doc["failures"][0].get("notify"))
+        # 恢复（无 advisory）→ 状态更新为空，不 notify
+        doc = {"failures": []}
+        run._apply_advisory_notify(doc, state)
+        self.assertEqual(state["advisory_state"], [])
+        # 恢复后再出现 → 再次 notify
+        doc = {"failures": [advisory("403")]}
+        run._apply_advisory_notify(doc, state)
+        self.assertTrue(doc["failures"][0].get("notify"))
 
 
 class ManualWindowTests(unittest.TestCase):

@@ -51,6 +51,40 @@ def content_version(short: str, long: str) -> str:
     return hashlib.sha256(payload).hexdigest()[:16]
 
 
+def _advisory_fingerprint(failures: list[dict]) -> list[list[str]]:
+    """Stable fingerprint of advisory failures for cross-run comparison.
+
+    Lists (not tuples) so the JSON round-trip through state.json preserves
+    equality across runs.
+    """
+    return sorted(
+        [str(f.get("source") or ""), str(f.get("reason") or "")]
+        for f in failures if is_advisory_failure(f)
+    )
+
+
+def _apply_advisory_notify(doc: dict, state: dict) -> dict:
+    """Mark advisory failures to surface in the brief only on first sight/change.
+
+    Persistent low-impact advisories (e.g. the known BLS cross-check 403) are
+    recorded in health.json every run but only surfaced in the rendered brief
+    the first time they appear or when the set/reason changes — repeating the
+    same warning every day trains the reader to ignore the channel.
+    """
+    failures = doc.get("failures") or []
+    current = _advisory_fingerprint(failures)
+    notify = bool(current) and current != state.get("advisory_state")
+    for f in failures:
+        if not is_advisory_failure(f):
+            continue
+        if notify:
+            f["notify"] = True
+        else:
+            f.pop("notify", None)  # 清除上次运行残留的标志
+    state["advisory_state"] = current
+    return doc
+
+
 def deliver_once(state: dict, adapter, *, tier: str, short: str, long: str,
                  day: str, delivered_at: str) -> tuple[bool, str]:
     """Deliver a content version once and mark state only after success."""
@@ -289,6 +323,10 @@ def _run_tier(tier: str, no_fetch: bool, delivery_dir: str | None) -> int:
     if not doc:
         return _pipeline_failure(tier, "events", "events.json 缺失")
 
+    state = read_json(DATA / "state.json", {}) or {}
+    # advisory 提醒去重：简报只在首次出现/状态变化时提醒，health.json 照常记录
+    write_json(DATA / "events.json", _apply_advisory_notify(doc, state))
+
     long_txt = render_mod.render(tier, short=False)
     short_txt = render_mod.render(tier, short=True)
 
@@ -297,7 +335,6 @@ def _run_tier(tier: str, no_fetch: bool, delivery_dir: str | None) -> int:
     out_s = LOGS / f"{today_et().isoformat()}-{tier}-short.md"
     atomic_write_text(out_s, short_txt)
 
-    state = read_json(DATA / "state.json", {}) or {}
     finished_at = now_utc_iso()
     state["last_run"] = {"tier": tier, "at": finished_at}
     configured_delivery = delivery_dir or os.environ.get("FINCAL_DELIVERY_DIR")
