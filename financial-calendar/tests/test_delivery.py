@@ -1,5 +1,6 @@
 """Tests for the deterministic IM delivery dispatcher (deliver_im.py)."""
 import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,6 +27,7 @@ class DeliveryTest(unittest.TestCase):
         # Point ledger + archive at temp paths so tests never touch runtime/.
         deliver_im.LEDGER = self.dir / "im_delivery.json"
         deliver_im.IM_ARCHIVE = self.dir / "im-delivery"
+        deliver_im.DELIVERY_LOCK = self.dir / ".im_delivery.lock"
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -50,6 +52,35 @@ class ChannelDoneTest(DeliveryTest):
 
 
 class FanOutTest(DeliveryTest):
+    def test_later_timeout_cannot_erase_earlier_channel_successes(self):
+        cfg = {
+            "channels": [
+                {"name": "feishu", "target": "feishu:oc_x"},
+                {"name": "weixin", "target": "weixin:o9_x"},
+                {"name": "email", "target": "email:Flood"},
+            ],
+        }
+        ledger = {}
+        timeout = subprocess.TimeoutExpired(["hermes", "send"], 60)
+        with mock.patch.object(deliver_im, "hermes_send",
+                               side_effect=[True, True, timeout]):
+            failed = deliver_im._fan_out(
+                cfg["channels"], ledger, "k", "hi", dry_run=False)
+
+        persisted = deliver_im.load_ledger()
+        self.assertEqual(failed, ["email"])
+        self.assertEqual(persisted["k"]["feishu"]["status"], "ok")
+        self.assertEqual(persisted["k"]["weixin"]["status"], "ok")
+        self.assertEqual(persisted["k"]["email"]["status"], "uncertain")
+
+        # A later cron tick skips both successful channels and holds the
+        # ambiguous timeout for manual review instead of duplicating it.
+        with mock.patch.object(deliver_im, "hermes_send") as send:
+            failed = deliver_im._fan_out(
+                cfg["channels"], persisted, "k", "hi", dry_run=False)
+        send.assert_not_called()
+        self.assertEqual(failed, ["email"])
+
     def test_partial_failure_retries_only_failed_channel(self):
         ledger = {"k": {"feishu": {"status": "ok"}, "weixin": {"status": "failed"}}}
         calls = []
@@ -167,12 +198,23 @@ class HermesSendTest(DeliveryTest):
     def test_uses_expected_args_and_exit_zero(self):
         with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)) as run:
             self.assertTrue(deliver_im.hermes_send("feishu:oc_x", "hello"))
-        args, _ = run.call_args
+        args, kwargs = run.call_args
         self.assertEqual(args[0][:4], ["hermes", "send", "--to", "feishu:oc_x"])
+        self.assertEqual(args[0][-2:], ["--file", "-"])
+        self.assertNotIn("hello", args[0])
+        self.assertEqual(kwargs["input"], "hello")
 
     def test_nonzero_exit_means_failure(self):
         with mock.patch("subprocess.run", return_value=mock.Mock(returncode=1)):
             self.assertFalse(deliver_im.hermes_send("feishu:oc_x", "hello"))
+
+
+class DeliveryLockTest(DeliveryTest):
+    def test_second_dispatcher_cannot_acquire_lock(self):
+        with deliver_im.delivery_lock() as first:
+            self.assertTrue(first)
+            with deliver_im.delivery_lock() as second:
+                self.assertFalse(second)
 
 
 if __name__ == "__main__":

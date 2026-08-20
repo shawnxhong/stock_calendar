@@ -89,7 +89,9 @@ python scripts/run.py --tier=week --no-fetch   # 用缓存数据重渲染
 `config/event_explanations.yaml` 读取，agent 不得根据当日行情临场生成或推断方向。
 设置 `FINCAL_DATA_DIR`、`FINCAL_LOG_DIR`、`FINCAL_DELIVERY_DIR` 后可使用独立生产
 持久目录和 shadow 文件投递；幂等键由日期、tier 与渲染内容哈希组成，adapter 成功后
-才记录状态。dispatcher 缺幂等键时拒绝发送（不做文件名兜底）。
+才记录状态。dispatcher 缺幂等键时拒绝发送（不做文件名兜底）；各渠道在发送前写入
+意图、发送后立即原子落账，不能等整个 fan-out 完成。超时视为结果不确定并停止自动
+重试，避免供应商已接收但本地未知时形成重复投递。
 
 **生产手动触发只经 `deploy/hermes/fincal_run.sh` wrapper**（注入全部三个环境变量）。
 禁止直接 `run.py --no-fetch`：会误读 `financial-calendar/data/` 开发缓存，或在未设

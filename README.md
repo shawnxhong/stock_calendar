@@ -107,7 +107,9 @@ FINCAL_DELIVERY_DIR="$PWD/runtime/shadow-delivery" \
 ```
 
 - 门控：`unhealthy` 只发故障告警（飞书+telegram）、`degraded` 透传 render 内置降级横幅。
-- 幂等：`runtime/data/im_delivery.json` 记「幂等键 × 渠道」，部分失败只重试失败渠道。
+- 幂等：`runtime/data/im_delivery.json` 记「幂等键 × 渠道」，每个渠道结果立即原子落账；
+  明确失败只重试失败渠道，超时等不确定结果停止自动重试，避免重复投递。
+- 并发：分发器持有进程锁，Hermes cron 与人工触发不能同时改写投递账本。
 - 存档：每条成功消息正文写入 `runtime/im-delivery/{key}-{channel}.md`。
 
 生产调度由 Hermes `no_agent` cron 每 30 分钟轮询（wrapper 见
@@ -121,7 +123,7 @@ FINCAL_DELIVERY_DIR="$PWD/runtime/shadow-delivery" \
 python3 /home/hong/.codex/skills/.system/skill-creator/scripts/quick_validate.py financial-calendar
 ```
 
-当前本地回归包含 88 个测试，覆盖日期数学、DST、源失败、快照恢复、diff、防抖、
+当前本地回归包含 90 个测试，覆盖日期数学、DST、源失败、快照恢复、diff、防抖、
 短版上限、重复运行幂等和 IM 投递门控/幂等/存档。
 
 ## 上线边界
